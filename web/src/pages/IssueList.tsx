@@ -439,7 +439,7 @@ export default function IssueList() {
                         {issue.status}
                       </Badge>
                       {issue.status === 'resolved' && issue.cooldown_until && (
-                        <span className="text-xs text-muted-foreground font-mono">cooldown</span>
+                        <span className="text-xs text-muted-foreground font-mono">cooldown until {new Date(issue.cooldown_until).toLocaleString()}</span>
                       )}
                     </div>
                     <p className="font-medium truncate">{issue.title}</p>
