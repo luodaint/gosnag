@@ -438,7 +438,7 @@ export default function IssueList() {
                       <Badge variant={STATUS_COLORS[issue.status] || 'outline'} className="text-xs">
                         {issue.status}
                       </Badge>
-                      {issue.cooldown_until && (
+                      {issue.status === 'resolved' && issue.cooldown_until && (
                         <span className="text-xs text-muted-foreground font-mono">cooldown</span>
                       )}
                     </div>
