@@ -32,6 +32,7 @@ export default function ProjectSettings() {
   const [alerts, setAlerts] = useState<AlertConfig[]>([])
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
+  const [defaultCooldown, setDefaultCooldown] = useState('60')
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -56,6 +57,7 @@ export default function ProjectSettings() {
         setProject(p)
         setName(p.name)
         setSlug(p.slug)
+        setDefaultCooldown(String(p.default_cooldown_minutes ?? 60))
       }),
       api.listAlerts(projectId).then(setAlerts),
     ]).finally(() => setLoading(false))
@@ -63,7 +65,7 @@ export default function ProjectSettings() {
 
   const handleSave = async () => {
     if (!projectId) return
-    await api.updateProject(projectId, { name, slug })
+    await api.updateProject(projectId, { name, slug, default_cooldown_minutes: parseInt(defaultCooldown) || 0 })
     const updated = await api.getProject(projectId)
     setProject(updated)
     toast.success('Project settings saved')
@@ -227,6 +229,20 @@ export default function ProjectSettings() {
                 <label className="text-sm font-medium">Slug</label>
                 <Input value={slug} onChange={e => setSlug(e.target.value)} className="mt-1" />
               </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Default Cooldown</label>
+              <Select value={defaultCooldown} onChange={e => setDefaultCooldown(e.target.value)} className="mt-1">
+                <option value="0">No cooldown</option>
+                <option value="60">1 hour</option>
+                <option value="120">2 hours</option>
+                <option value="1440">1 day</option>
+                <option value="2880">2 days</option>
+                <option value="10080">1 week</option>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                When resolving issues with "Project default", this cooldown period will be used.
+              </p>
             </div>
             <div className="flex justify-between">
               <Button onClick={handleSave}>Save</Button>

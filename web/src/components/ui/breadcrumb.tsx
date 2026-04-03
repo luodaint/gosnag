@@ -8,7 +8,7 @@ interface BreadcrumbItem {
 
 export function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
   return (
-    <div className="flex items-center gap-1.5 mb-4 text-sm text-muted-foreground">
+    <div className="flex items-center gap-1.5 mb-4 text-sm text-muted-foreground min-w-0">
       {items.map((item, i) => (
         <span key={i} className="flex items-center gap-1.5">
           {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />}
@@ -17,7 +17,7 @@ export function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
               {item.label}
             </Link>
           ) : (
-            <span className="text-foreground font-medium">{item.label}</span>
+            <span className="text-foreground font-medium truncate max-w-[300px]" title={item.label}>{item.label}</span>
           )}
         </span>
       ))}
