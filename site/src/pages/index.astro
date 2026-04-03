@@ -71,7 +71,7 @@ const limitations = [
   <head>
     <meta charset="utf-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GoSnag — Lightweight Self-Hosted Error Tracking</title>
     <meta name="description" content="Sentry-compatible error tracking that runs on 4MB of RAM. Single Go binary, embedded React UI, PostgreSQL. Open source, self-hosted." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -402,6 +402,7 @@ Sentry.init({"{"}<br/>  dsn: <span class="t-string">"https://&lt;key&gt;@your-se
         scroll-behavior: smooth;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
+        overflow-x: hidden;
       }
 
       body {
@@ -1207,7 +1208,43 @@ Sentry.init({"{"}<br/>  dsn: <span class="t-string">"https://&lt;key&gt;@your-se
       }
 
       /* ---- Responsive ---- */
+
+      /* Tablet and below */
       @media (max-width: 768px) {
+        .hero {
+          padding: 120px 0 56px;
+          overflow: hidden;
+        }
+
+        .hero-glow {
+          width: 300px;
+          height: 250px;
+        }
+
+        .hero-sub {
+          font-size: 1rem;
+        }
+
+        .hero-actions {
+          flex-direction: column;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .hero-actions a {
+          width: 100%;
+          max-width: 260px;
+          justify-content: center;
+        }
+
+        .terminal {
+          max-width: 100%;
+        }
+
+        .terminal-body pre {
+          font-size: 0.7rem;
+        }
+
         .stats-grid {
           grid-template-columns: repeat(2, 1fr);
         }
@@ -1227,12 +1264,22 @@ Sentry.init({"{"}<br/>  dsn: <span class="t-string">"https://&lt;key&gt;@your-se
           min-width: unset;
         }
 
+        .arch-node {
+          min-width: unset;
+          width: 100%;
+          max-width: 280px;
+        }
+
         .arch-details {
           grid-template-columns: 1fr;
         }
 
         .reasons-grid {
           grid-template-columns: 1fr;
+        }
+
+        .reason-card {
+          padding: 24px;
         }
 
         .limitations-grid {
@@ -1248,6 +1295,11 @@ Sentry.init({"{"}<br/>  dsn: <span class="t-string">"https://&lt;key&gt;@your-se
           gap: 12px;
         }
 
+        .code-block pre {
+          font-size: 0.72rem;
+          padding: 16px;
+        }
+
         .footer-inner {
           flex-direction: column;
           gap: 8px;
@@ -1256,6 +1308,86 @@ Sentry.init({"{"}<br/>  dsn: <span class="t-string">"https://&lt;key&gt;@your-se
 
         .cta-inner {
           padding: 40px 24px;
+        }
+
+        .section-header {
+          margin-bottom: 40px;
+        }
+
+        .features,
+        .architecture,
+        .lightweight,
+        .limitations,
+        .quickstart,
+        .cta {
+          padding: 64px 0;
+        }
+      }
+
+      /* Small phones */
+      @media (max-width: 480px) {
+        .container {
+          padding: 0 16px;
+        }
+
+        .hero {
+          padding: 100px 0 40px;
+        }
+
+        .hero h1 {
+          font-size: 2rem;
+        }
+
+        .hero-sub {
+          font-size: 0.92rem;
+        }
+
+        .hero-badge {
+          font-size: 0.72rem;
+          padding: 5px 12px;
+        }
+
+        .stats-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .stat-value {
+          font-size: 1.4rem;
+        }
+
+        .stat-card {
+          padding: 20px 12px;
+        }
+
+        .feature-card {
+          padding: 24px 20px;
+        }
+
+        .limitation-card {
+          padding: 20px 16px;
+        }
+
+        .reason-number {
+          font-size: 1.8rem;
+        }
+
+        .terminal-body pre {
+          font-size: 0.62rem;
+          line-height: 1.6;
+        }
+
+        .code-block pre {
+          font-size: 0.65rem;
+          padding: 12px;
+          word-break: break-all;
+        }
+
+        .cta-inner {
+          padding: 32px 16px;
+        }
+
+        .cta h2 {
+          font-size: 1.2rem;
         }
       }
     </style>
