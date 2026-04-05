@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { ChevronLeft, ChevronRight, ChevronDown, Settings, Trash2, Filter, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -87,6 +88,8 @@ export default function IssueList() {
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [showBulkDelete, setShowBulkDelete] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showMerge, setShowMerge] = useState(false)
   const [showMobileFilters, setShowMobileFilters] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -425,11 +428,26 @@ export default function IssueList() {
                 if (sort === 'first_seen') return new Date(b.first_seen).getTime() - new Date(a.first_seen).getTime()
                 return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime()
               }).map(issue => (
-                <Link
+                <div
                   key={issue.id}
-                  to={`/projects/${projectId}/issues/${issue.id}`}
                   className={`flex items-center p-4 hover:bg-accent/50 transition-colors border-l-2 ${LEVEL_BORDER[issue.level] || 'border-l-transparent'}`}
                 >
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(issue.id)}
+                    onChange={e => {
+                      const next = new Set(selectedIds)
+                      if (e.target.checked) next.add(issue.id)
+                      else next.delete(issue.id)
+                      setSelectedIds(next)
+                    }}
+                    className="mr-3 shrink-0 accent-primary h-4 w-4 cursor-pointer"
+                    onClick={e => e.stopPropagation()}
+                  />
+                  <Link
+                    to={`/projects/${projectId}/issues/${issue.id}`}
+                    className="flex items-center min-w-0 flex-1"
+                  >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
                       <Badge variant={LEVEL_COLORS[issue.level] || 'outline'} className="text-xs">
@@ -458,7 +476,8 @@ export default function IssueList() {
                   <div className="w-24 ml-2 shrink-0 hidden md:flex justify-end">
                     <Sparkline data={issue.trend || []} />
                   </div>
-                </Link>
+                  </Link>
+                </div>
               ))}
               </div>
             </div>
@@ -489,6 +508,20 @@ export default function IssueList() {
                       <ChevronRight className="h-4 w-4" />
                     </Button>
                   </>
+                )}
+                {selectedIds.size >= 2 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline" size="sm"
+                        className="ml-2"
+                        onClick={() => setShowMerge(true)}
+                      >
+                        Merge ({selectedIds.size})
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Merge selected issues into one</TooltipContent>
+                  </Tooltip>
                 )}
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -522,7 +555,80 @@ export default function IssueList() {
           setRefreshKey(k => k + 1)
         }}
       />
+
+      {showMerge && (
+        <MergeDialog
+          issues={issues.filter(i => selectedIds.has(i.id))}
+          onClose={() => setShowMerge(false)}
+          onMerge={async (primaryId) => {
+            if (!projectId) return
+            const secondaryIds = [...selectedIds].filter(id => id !== primaryId)
+            await api.mergeIssues(projectId, primaryId, secondaryIds)
+            toast.success(`${secondaryIds.length} issues merged`)
+            setSelectedIds(new Set())
+            setShowMerge(false)
+            setRefreshKey(k => k + 1)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function MergeDialog({ issues, onClose, onMerge }: { issues: Issue[]; onClose: () => void; onMerge: (primaryId: string) => Promise<void> }) {
+  // Default primary = issue with most events
+  const sorted = [...issues].sort((a, b) => b.event_count - a.event_count)
+  const [primaryId, setPrimaryId] = useState(sorted[0]?.id || '')
+  const [merging, setMerging] = useState(false)
+
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose() }}>
+      <DialogContent>
+        <DialogTitle>Merge Issues</DialogTitle>
+        <DialogDescription className="sr-only">Select the primary issue to merge into</DialogDescription>
+        <p className="text-sm text-muted-foreground mt-2">
+          Select the primary issue. The other {issues.length - 1} issue(s) will be merged into it. Their events will be reassigned and future events with the same fingerprint will go to the primary.
+        </p>
+        <div className="mt-4 space-y-2 max-h-64 overflow-y-auto">
+          {sorted.map(issue => (
+            <label
+              key={issue.id}
+              className={cn(
+                'flex items-center gap-3 p-3 border rounded-md cursor-pointer transition-colors',
+                primaryId === issue.id ? 'border-primary bg-primary/5' : 'border-border hover:border-border/80'
+              )}
+            >
+              <input
+                type="radio"
+                name="primary"
+                checked={primaryId === issue.id}
+                onChange={() => setPrimaryId(issue.id)}
+                className="accent-primary"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium truncate">{issue.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {issue.event_count} events &middot; {issue.level} &middot; {issue.platform}
+                </p>
+              </div>
+            </label>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={merging}
+            onClick={async () => {
+              setMerging(true)
+              await onMerge(primaryId)
+              setMerging(false)
+            }}
+          >
+            {merging ? 'Merging...' : `Merge into selected`}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

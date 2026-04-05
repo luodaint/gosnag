@@ -58,6 +58,8 @@ export const api = {
   },
   deleteIssues: (projectId: string, ids: string[]) =>
     request<{ deleted: number }>(`/projects/${projectId}/issues`, { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  mergeIssues: (projectId: string, primaryId: string, issueIds: string[]) =>
+    request<Issue>(`/projects/${projectId}/issues/merge`, { method: 'POST', body: JSON.stringify({ primary_id: primaryId, issue_ids: issueIds }) }),
   getIssue: (projectId: string, issueId: string) =>
     request<Issue>(`/projects/${projectId}/issues/${issueId}`),
   updateIssueStatus: (projectId: string, issueId: string, data: { status: string; cooldown_minutes?: number; resolved_in_release?: string; snooze_minutes?: number; snooze_event_threshold?: number }) =>

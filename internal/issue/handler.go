@@ -17,10 +17,15 @@ import (
 
 type Handler struct {
 	queries *db.Queries
+	database *sql.DB
 }
 
-func NewHandler(queries *db.Queries) *Handler {
-	return &Handler{queries: queries}
+func NewHandler(queries *db.Queries, database ...*sql.DB) *Handler {
+	h := &Handler{queries: queries}
+	if len(database) > 0 {
+		h.database = database[0]
+	}
+	return h
 }
 
 type UpdateIssueRequest struct {

@@ -143,6 +143,18 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 	now := time.Now()
 	issueLevel := normalizeIssueLevel(event.Level, project.WarningAsError)
 
+	// Check if this fingerprint is an alias for a merged issue
+	if alias, err := h.queries.GetIssueAlias(ctx, db.GetIssueAliasParams{
+		ProjectID:   projectID,
+		Fingerprint: fingerprint,
+	}); err == nil {
+		// Redirect to the primary issue's fingerprint
+		primaryIssue, err := h.queries.GetIssue(ctx, alias.PrimaryIssueID)
+		if err == nil {
+			fingerprint = primaryIssue.Fingerprint
+		}
+	}
+
 	// Upsert issue (create or update event count)
 	issue, err := h.queries.UpsertIssue(ctx, db.UpsertIssueParams{
 		ProjectID:   projectID,

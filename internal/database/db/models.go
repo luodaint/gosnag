@@ -77,6 +77,14 @@ type Issue struct {
 	JiraTicketUrl        sql.NullString `json:"jira_ticket_url"`
 }
 
+type IssueAlias struct {
+	ID             uuid.UUID `json:"id"`
+	ProjectID      uuid.UUID `json:"project_id"`
+	Fingerprint    string    `json:"fingerprint"`
+	PrimaryIssueID uuid.UUID `json:"primary_issue_id"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 type JiraRule struct {
 	ID           uuid.UUID `json:"id"`
 	ProjectID    uuid.UUID `json:"project_id"`

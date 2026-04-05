@@ -60,7 +60,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	queries := db.New(database)
 
 	projectHandler := project.NewHandler(queries)
-	issueHandler := issue.NewHandler(queries)
+	issueHandler := issue.NewHandler(queries, database)
 	userHandler := user.NewHandler(queries)
 	alertHandler := alert.NewHandler(queries)
 	jiraHandler := jira.NewHandler(queries, cfg)
@@ -138,6 +138,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 		r.Route("/projects/{project_id}/issues", func(r chi.Router) {
 			r.Get("/", issueHandler.List)
 			r.With(auth.RequireWritePermission).Delete("/", issueHandler.BulkDelete)
+			r.With(auth.RequireWritePermission).Post("/merge", issueHandler.Merge)
 			r.Get("/counts", issueHandler.Counts)
 			r.Route("/{issue_id}", func(r chi.Router) {
 				r.Get("/", issueHandler.Get)
