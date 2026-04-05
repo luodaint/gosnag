@@ -27,12 +27,18 @@ export const api = {
   googleLogin: (credential: string) =>
     request<User>('/auth/google/token', { method: 'POST', body: JSON.stringify({ credential }) }),
 
+  // Groups
+  listGroups: () => request<ProjectGroup[]>('/groups'),
+  createGroup: (name: string) => request<ProjectGroup>('/groups', { method: 'POST', body: JSON.stringify({ name }) }),
+  updateGroup: (id: string, name: string) => request<ProjectGroup>(`/groups/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
+  deleteGroup: (id: string) => request<void>(`/groups/${id}`, { method: 'DELETE' }),
+
   // Projects
   listProjects: () => request<Project[]>('/projects'),
   getProject: (id: string) => request<ProjectWithDSN>(`/projects/${id}`),
   createProject: (data: { name: string; slug?: string; default_cooldown_minutes?: number }) =>
     request<ProjectWithDSN>('/projects', { method: 'POST', body: JSON.stringify(data) }),
-  updateProject: (id: string, data: { name: string; slug: string; default_cooldown_minutes?: number; warning_as_error?: boolean; jira_base_url?: string; jira_email?: string; jira_api_token?: string; jira_project_key?: string; jira_issue_type?: string }) =>
+  updateProject: (id: string, data: { name: string; slug: string; default_cooldown_minutes?: number; warning_as_error?: boolean; jira_base_url?: string; jira_email?: string; jira_api_token?: string; jira_project_key?: string; jira_issue_type?: string; group_id?: string | null }) =>
     request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProject: (id: string) =>
     request<void>(`/projects/${id}`, { method: 'DELETE' }),
@@ -123,6 +129,13 @@ export interface User {
   created_at: string
 }
 
+export interface ProjectGroup {
+  id: string
+  name: string
+  position: number
+  created_at: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -134,6 +147,7 @@ export interface Project {
   jira_api_token_set: boolean
   jira_project_key: string
   jira_issue_type: string
+  group_id: string | null
   created_at: string
   total_issues?: number
   open_issues?: number

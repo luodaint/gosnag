@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type ProjectWithDSN, type AlertConfig, type APIToken, type JiraRule } from '@/lib/api'
+import { api, type ProjectWithDSN, type AlertConfig, type APIToken, type JiraRule, type ProjectGroup } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -57,6 +57,8 @@ export default function ProjectSettings() {
   const [ruleMinUsers, setRuleMinUsers] = useState('')
   const [ruleTitlePattern, setRuleTitlePattern] = useState('')
   const [showDeleteRule, setShowDeleteRule] = useState<string | null>(null)
+  const [allGroups, setAllGroups] = useState<ProjectGroup[]>([])
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('')
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
   const [defaultCooldown, setDefaultCooldown] = useState('60')
@@ -92,6 +94,7 @@ export default function ProjectSettings() {
     setJiraApiToken('')
     setJiraProjectKey(p.jira_project_key || '')
     setJiraIssueType(p.jira_issue_type || 'Bug')
+    setSelectedGroupId(p.group_id || '')
   }
 
   const refreshProject = async (id: string) => {
@@ -110,6 +113,7 @@ export default function ProjectSettings() {
     jira_api_token: jiraApiToken,
     jira_project_key: jiraProjectKey,
     jira_issue_type: jiraIssueType,
+    group_id: selectedGroupId || null,
   })
 
   useEffect(() => {
@@ -119,6 +123,7 @@ export default function ProjectSettings() {
       api.listAlerts(projectId).then(setAlerts),
       api.listTokens(projectId).then(setTokens),
       api.listJiraRules(projectId).then(setJiraRules),
+      api.listGroups().then(setAllGroups),
     ]).finally(() => setLoading(false))
   }, [projectId])
 
@@ -568,6 +573,21 @@ export default function ProjectSettings() {
                         </p>
                       </div>
                     </div>
+
+                    {allGroups.length > 0 && (
+                      <div>
+                        <label className="text-sm font-medium">Group</label>
+                        <Select value={selectedGroupId} onChange={e => setSelectedGroupId(e.target.value)} className="mt-1">
+                          <option value="">No group</option>
+                          {allGroups.map(g => (
+                            <option key={g.id} value={g.id}>{g.name}</option>
+                          ))}
+                        </Select>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Organize this project into a group tab on the project list.
+                        </p>
+                      </div>
+                    )}
 
                     <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-xs text-muted-foreground">General settings save independently from tokens, alerts, and Jira rules.</p>

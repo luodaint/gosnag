@@ -15,7 +15,7 @@ import (
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (name, slug, default_cooldown_minutes)
 VALUES ($1, $2, $3)
-RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type
+RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id
 `
 
 type CreateProjectParams struct {
@@ -40,6 +40,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.JiraApiToken,
 		&i.JiraProjectKey,
 		&i.JiraIssueType,
+		&i.GroupID,
 	)
 	return i, err
 }
@@ -86,7 +87,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id uuid.UUID) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type FROM projects WHERE id = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id FROM projects WHERE id = $1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error) {
@@ -105,12 +106,13 @@ func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error)
 		&i.JiraApiToken,
 		&i.JiraProjectKey,
 		&i.JiraIssueType,
+		&i.GroupID,
 	)
 	return i, err
 }
 
 const getProjectBySlug = `-- name: GetProjectBySlug :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type FROM projects WHERE slug = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id FROM projects WHERE slug = $1
 `
 
 func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, error) {
@@ -129,6 +131,7 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, e
 		&i.JiraApiToken,
 		&i.JiraProjectKey,
 		&i.JiraIssueType,
+		&i.GroupID,
 	)
 	return i, err
 }
@@ -344,7 +347,7 @@ func (q *Queries) ListProjectKeys(ctx context.Context, projectID uuid.UUID) ([]P
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type FROM projects ORDER BY created_at DESC
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id FROM projects ORDER BY created_at DESC
 `
 
 func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
@@ -369,6 +372,7 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.JiraApiToken,
 			&i.JiraProjectKey,
 			&i.JiraIssueType,
+			&i.GroupID,
 		); err != nil {
 			return nil, err
 		}
@@ -389,7 +393,7 @@ SET name = $2, slug = $3, default_cooldown_minutes = $4, warning_as_error = $5,
     jira_base_url = $6, jira_email = $7, jira_api_token = $8, jira_project_key = $9, jira_issue_type = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type
+RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id
 `
 
 type UpdateProjectParams struct {
@@ -432,6 +436,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.JiraApiToken,
 		&i.JiraProjectKey,
 		&i.JiraIssueType,
+		&i.GroupID,
 	)
 	return i, err
 }

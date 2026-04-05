@@ -30,8 +30,9 @@ type CreateProjectRequest struct {
 	JiraBaseURL            string `json:"jira_base_url"`
 	JiraEmail              string `json:"jira_email"`
 	JiraAPIToken           string `json:"jira_api_token"`
-	JiraProjectKey         string `json:"jira_project_key"`
-	JiraIssueType          string `json:"jira_issue_type"`
+	JiraProjectKey         string  `json:"jira_project_key"`
+	JiraIssueType          string  `json:"jira_issue_type"`
+	GroupID                *string `json:"group_id,omitempty"`
 }
 
 // SafeProject strips sensitive fields (Jira API token) from the project for API responses.
@@ -45,9 +46,10 @@ type SafeProject struct {
 	JiraEmail              string    `json:"jira_email"`
 	JiraAPITokenSet        bool      `json:"jira_api_token_set"` // true if configured, never expose the value
 	JiraProjectKey         string    `json:"jira_project_key"`
-	JiraIssueType          string    `json:"jira_issue_type"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	JiraIssueType          string        `json:"jira_issue_type"`
+	GroupID                uuid.NullUUID `json:"group_id"`
+	CreatedAt              time.Time     `json:"created_at"`
+	UpdatedAt              time.Time     `json:"updated_at"`
 }
 
 func toSafeProject(p db.Project) SafeProject {
@@ -62,6 +64,7 @@ func toSafeProject(p db.Project) SafeProject {
 		JiraAPITokenSet:        p.JiraApiToken != "",
 		JiraProjectKey:         p.JiraProjectKey,
 		JiraIssueType:          p.JiraIssueType,
+		GroupID:                p.GroupID,
 		CreatedAt:              p.CreatedAt,
 		UpdatedAt:              p.UpdatedAt,
 	}
@@ -304,6 +307,24 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update project")
 		return
+	}
+
+	// Update group assignment if provided
+	if req.GroupID != nil {
+		var groupID uuid.NullUUID
+		if *req.GroupID != "" {
+			parsed, err := uuid.Parse(*req.GroupID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid group_id")
+				return
+			}
+			groupID = uuid.NullUUID{UUID: parsed, Valid: true}
+		}
+		_ = h.queries.SetProjectGroup(r.Context(), db.SetProjectGroupParams{
+			ID:      id,
+			GroupID: groupID,
+		})
+		project.GroupID = groupID
 	}
 
 	writeJSON(w, http.StatusOK, toSafeProject(project))

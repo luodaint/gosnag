@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, type Project } from '@/lib/api'
+import { api, type Project, type ProjectGroup } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { ProjectCardsSkeleton } from '@/components/ui/skeleton'
-import { Plus, FolderOpen, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { Plus, FolderOpen, TrendingUp, TrendingDown, Minus, X, Pencil } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
 
 const PROJECT_COLORS = ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4']
@@ -32,13 +33,50 @@ function projectColor(name: string) {
 export default function Projects() {
   const { user } = useAuth()
   const [projects, setProjects] = useState<Project[]>([])
+  const [groups, setGroups] = useState<ProjectGroup[]>([])
+  const [activeGroup, setActiveGroup] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showCreateGroup, setShowCreateGroup] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<ProjectGroup | null>(null)
+  const [groupName, setGroupName] = useState('')
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.listProjects().then(setProjects).finally(() => setLoading(false))
+    Promise.all([
+      api.listProjects().then(setProjects),
+      api.listGroups().then(setGroups),
+    ]).finally(() => setLoading(false))
   }, [])
+
+  const filteredProjects = activeGroup
+    ? projects.filter(p => p.group_id === activeGroup)
+    : projects
+
+  const handleCreateGroup = async () => {
+    if (!groupName.trim()) return
+    await api.createGroup(groupName.trim())
+    setGroups(await api.listGroups())
+    setGroupName('')
+    setShowCreateGroup(false)
+    toast.success('Group created')
+  }
+
+  const handleUpdateGroup = async () => {
+    if (!editingGroup || !groupName.trim()) return
+    await api.updateGroup(editingGroup.id, groupName.trim())
+    setGroups(await api.listGroups())
+    setGroupName('')
+    setEditingGroup(null)
+    toast.success('Group renamed')
+  }
+
+  const handleDeleteGroup = async (id: string) => {
+    await api.deleteGroup(id)
+    setGroups(await api.listGroups())
+    if (activeGroup === id) setActiveGroup(null)
+    toast.success('Group deleted')
+  }
 
   const handleCreate = async () => {
     if (!name.trim()) return
@@ -72,7 +110,66 @@ export default function Projects() {
         )}
       </div>
 
-      {projects.length === 0 ? (
+      {/* Group tabs — only show if there are groups */}
+      {groups.length > 0 && (
+        <div className="flex items-center gap-1 mb-4 border-b border-border/60 overflow-x-auto">
+          <button
+            onClick={() => setActiveGroup(null)}
+            className={cn(
+              'px-3 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
+              activeGroup === null
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            All
+          </button>
+          {groups.map(g => (
+            <div key={g.id} className="relative group flex items-center">
+              <button
+                onClick={() => setActiveGroup(g.id)}
+                className={cn(
+                  'px-3 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
+                  activeGroup === g.id
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {g.name}
+                <span className="ml-1.5 text-xs text-muted-foreground/50">
+                  {projects.filter(p => p.group_id === g.id).length}
+                </span>
+              </button>
+              {user?.role === 'admin' && (
+                <div className="hidden group-hover:flex items-center gap-0.5 absolute -right-1 -top-1">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setEditingGroup(g); setGroupName(g.name) }}
+                    className="p-0.5 rounded bg-muted hover:bg-muted/80"
+                  >
+                    <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteGroup(g.id) }}
+                    className="p-0.5 rounded bg-muted hover:bg-destructive/20"
+                  >
+                    <X className="h-2.5 w-2.5 text-muted-foreground" />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          {user?.role === 'admin' && (
+            <button
+              onClick={() => { setGroupName(''); setShowCreateGroup(true) }}
+              className="px-2 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {filteredProjects.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="py-16 text-center text-muted-foreground">
             <div className="relative inline-block mb-4">
@@ -84,7 +181,7 @@ export default function Projects() {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {projects.map(p => {
+          {filteredProjects.map(p => {
             const thisWeek = p.errors_this_week ?? 0
             const lastWeek = p.errors_last_week ?? 0
             const diff = thisWeek - lastWeek
@@ -155,6 +252,47 @@ export default function Projects() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
               <Button onClick={handleCreate}>Create</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Group Dialog */}
+      <Dialog open={showCreateGroup} onOpenChange={setShowCreateGroup}>
+        <DialogContent>
+          <DialogTitle>Create Group</DialogTitle>
+          <DialogDescription className="sr-only">Enter a name for the new group</DialogDescription>
+          <div className="mt-4 space-y-4">
+            <Input
+              placeholder="e.g. Production, Development, Staging"
+              value={groupName}
+              onChange={e => setGroupName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleCreateGroup()}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowCreateGroup(false)}>Cancel</Button>
+              <Button onClick={handleCreateGroup}>Create</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Group Dialog */}
+      <Dialog open={!!editingGroup} onOpenChange={open => { if (!open) setEditingGroup(null) }}>
+        <DialogContent>
+          <DialogTitle>Rename Group</DialogTitle>
+          <DialogDescription className="sr-only">Enter a new name for the group</DialogDescription>
+          <div className="mt-4 space-y-4">
+            <Input
+              value={groupName}
+              onChange={e => setGroupName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleUpdateGroup()}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditingGroup(null)}>Cancel</Button>
+              <Button onClick={handleUpdateGroup}>Rename</Button>
             </div>
           </div>
         </DialogContent>

@@ -99,18 +99,26 @@ type JiraRule struct {
 }
 
 type Project struct {
-	ID                     uuid.UUID `json:"id"`
-	Name                   string    `json:"name"`
-	Slug                   string    `json:"slug"`
-	DefaultCooldownMinutes int32     `json:"default_cooldown_minutes"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
-	WarningAsError         bool      `json:"warning_as_error"`
-	JiraBaseUrl            string    `json:"jira_base_url"`
-	JiraEmail              string    `json:"jira_email"`
-	JiraApiToken           string    `json:"jira_api_token"`
-	JiraProjectKey         string    `json:"jira_project_key"`
-	JiraIssueType          string    `json:"jira_issue_type"`
+	ID                     uuid.UUID     `json:"id"`
+	Name                   string        `json:"name"`
+	Slug                   string        `json:"slug"`
+	DefaultCooldownMinutes int32         `json:"default_cooldown_minutes"`
+	CreatedAt              time.Time     `json:"created_at"`
+	UpdatedAt              time.Time     `json:"updated_at"`
+	WarningAsError         bool          `json:"warning_as_error"`
+	JiraBaseUrl            string        `json:"jira_base_url"`
+	JiraEmail              string        `json:"jira_email"`
+	JiraApiToken           string        `json:"jira_api_token"`
+	JiraProjectKey         string        `json:"jira_project_key"`
+	JiraIssueType          string        `json:"jira_issue_type"`
+	GroupID                uuid.NullUUID `json:"group_id"`
+}
+
+type ProjectGroup struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Position  int32     `json:"position"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type ProjectKey struct {

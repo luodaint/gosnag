@@ -99,6 +99,14 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 
 		r.Get("/me", oauthHandler.Me)
 
+		// Project Groups
+		r.Route("/groups", func(r chi.Router) {
+			r.Get("/", projectHandler.ListGroups)
+			r.With(auth.RequireAdmin).Post("/", projectHandler.CreateGroup)
+			r.With(auth.RequireAdmin).Put("/{group_id}", projectHandler.UpdateGroup)
+			r.With(auth.RequireAdmin).Delete("/{group_id}", projectHandler.DeleteGroup)
+		})
+
 		// Projects
 		r.Route("/projects", func(r chi.Router) {
 			r.Get("/", projectHandler.List)
