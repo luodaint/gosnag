@@ -2,6 +2,7 @@ package priority
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -52,7 +53,8 @@ func (c *velocityCache) set(key string, count int32) {
 
 // Evaluate calculates the priority score for an issue based on project rules.
 // Should be called asynchronously after event ingestion.
-func Evaluate(ctx context.Context, queries *db.Queries, projectID uuid.UUID, issue db.Issue) {
+// eventData is the raw JSON of the latest event (for full-text search in rules).
+func Evaluate(ctx context.Context, queries *db.Queries, projectID uuid.UUID, issue db.Issue, eventData json.RawMessage) {
 	rules, err := queries.ListEnabledPriorityRules(ctx, projectID)
 	if err != nil || len(rules) == 0 {
 		return
@@ -61,6 +63,12 @@ func Evaluate(ctx context.Context, queries *db.Queries, projectID uuid.UUID, iss
 	// Lazy-load expensive data only if needed
 	var velocity1h, velocity24h *int32
 	var userCount *int32
+
+	// Flatten event data to string for full-text pattern matching
+	eventText := string(eventData)
+
+	// Build searchable text: title + full event data
+	searchText := issue.Title + "\n" + eventText
 
 	score := int32(50) // base score
 
@@ -94,22 +102,12 @@ func Evaluate(ctx context.Context, queries *db.Queries, projectID uuid.UUID, iss
 
 		case "title_contains":
 			if rule.Pattern != "" {
-				re, err := regexp.Compile(rule.Pattern)
-				if err != nil {
-					matched = strings.Contains(strings.ToLower(issue.Title), strings.ToLower(rule.Pattern))
-				} else {
-					matched = re.MatchString(issue.Title)
-				}
+				matched = matchesPattern(rule.Pattern, searchText)
 			}
 
 		case "title_not_contains":
 			if rule.Pattern != "" {
-				re, err := regexp.Compile(rule.Pattern)
-				if err != nil {
-					matched = !strings.Contains(strings.ToLower(issue.Title), strings.ToLower(rule.Pattern))
-				} else {
-					matched = !re.MatchString(issue.Title)
-				}
+				matched = !matchesPattern(rule.Pattern, searchText)
 			}
 
 		case "level_is":
@@ -156,10 +154,24 @@ func EvaluateAll(ctx context.Context, queries *db.Queries, projectID uuid.UUID) 
 		if err != nil {
 			continue
 		}
-		Evaluate(ctx, queries, projectID, issue)
+		// For bulk recalc, load latest event data
+		var eventData json.RawMessage
+		events, err := queries.ListEventsByIssue(ctx, db.ListEventsByIssueParams{IssueID: id, Limit: 1, Offset: 0})
+		if err == nil && len(events) > 0 {
+			eventData = events[0].Data
+		}
+		Evaluate(ctx, queries, projectID, issue, eventData)
 		count++
 	}
 	return count, nil
+}
+
+func matchesPattern(pattern, text string) bool {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return strings.Contains(strings.ToLower(text), strings.ToLower(pattern))
+	}
+	return re.MatchString(text)
 }
 
 func getVelocity1h(ctx context.Context, queries *db.Queries, issueID uuid.UUID) int32 {

@@ -15,10 +15,10 @@ import (
 type Handler struct {
 	queries     *db.Queries
 	alertFn     func(projectID uuid.UUID, issue db.Issue, isNew bool)
-	postEventFn func(projectID uuid.UUID, issue db.Issue)
+	postEventFn func(projectID uuid.UUID, issue db.Issue, eventData json.RawMessage)
 }
 
-func NewHandler(queries *db.Queries, alertFn func(projectID uuid.UUID, issue db.Issue, isNew bool), postEventFn func(projectID uuid.UUID, issue db.Issue)) *Handler {
+func NewHandler(queries *db.Queries, alertFn func(projectID uuid.UUID, issue db.Issue, isNew bool), postEventFn func(projectID uuid.UUID, issue db.Issue, eventData json.RawMessage)) *Handler {
 	return &Handler{queries: queries, alertFn: alertFn, postEventFn: postEventFn}
 }
 
@@ -254,7 +254,7 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 
 	// Always run post-event hooks (priority recalc, auto-tags, etc.)
 	if h.postEventFn != nil {
-		h.postEventFn(projectID, issue)
+		h.postEventFn(projectID, issue, rawData)
 	}
 }
 

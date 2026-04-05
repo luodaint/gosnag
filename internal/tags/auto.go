@@ -2,6 +2,7 @@ package tags
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -11,15 +12,18 @@ import (
 )
 
 // AutoTag evaluates tag rules for an issue and applies matching tags.
+// Searches both the issue title and the full event data (stacktrace, message, etc.).
 // Should be called asynchronously after event ingestion.
-func AutoTag(ctx context.Context, queries *db.Queries, projectID uuid.UUID, issue db.Issue) {
+func AutoTag(ctx context.Context, queries *db.Queries, projectID uuid.UUID, issue db.Issue, eventData json.RawMessage) {
 	rules, err := queries.ListEnabledTagRules(ctx, projectID)
 	if err != nil || len(rules) == 0 {
 		return
 	}
 
+	searchText := issue.Title + "\n" + string(eventData)
+
 	for _, rule := range rules {
-		if matchesPattern(rule.Pattern, issue.Title) {
+		if matchesPattern(rule.Pattern, searchText) {
 			err := queries.AddIssueTag(ctx, db.AddIssueTagParams{
 				IssueID: issue.ID,
 				Key:     rule.TagKey,
@@ -32,11 +36,10 @@ func AutoTag(ctx context.Context, queries *db.Queries, projectID uuid.UUID, issu
 	}
 }
 
-func matchesPattern(pattern, title string) bool {
+func matchesPattern(pattern, text string) bool {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		// Fall back to case-insensitive contains
-		return strings.Contains(strings.ToLower(title), strings.ToLower(pattern))
+		return strings.Contains(strings.ToLower(text), strings.ToLower(pattern))
 	}
-	return re.MatchString(title)
+	return re.MatchString(text)
 }

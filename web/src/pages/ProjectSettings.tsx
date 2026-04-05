@@ -596,9 +596,10 @@ export default function ProjectSettings() {
         <p className="max-w-3xl text-sm text-muted-foreground">Switch sections without mixing unrelated forms and actions.</p>
       </div>
 
-      <div className="space-y-6">
-        <div className="overflow-x-auto pb-1">
-          <div className="inline-flex min-w-full gap-2 rounded-xl border bg-card p-1.5">
+      <div className="flex gap-6">
+        {/* Sidebar navigation */}
+        <div className="hidden md:block w-48 shrink-0">
+          <nav className="space-y-1 sticky top-4">
             {sections.map(section => {
               const Icon = section.icon
               const isActive = activeSection === section.id
@@ -608,31 +609,36 @@ export default function ProjectSettings() {
                   type="button"
                   onClick={() => setActiveSection(section.id)}
                   className={cn(
-                    'flex min-w-fit items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors',
+                    'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
                     isActive
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                      ? 'bg-accent text-foreground font-medium'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
                   )}
                 >
-                  <Icon className="h-4 w-4" />
-                  <span>{section.label}</span>
-                  <span
-                    className={cn(
-                      'rounded-full px-2 py-0.5 text-[11px]',
-                      isActive
-                        ? 'bg-primary-foreground/15 text-primary-foreground'
-                        : 'bg-muted text-foreground/70'
-                    )}
-                  >
-                    {section.badge}
-                  </span>
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="flex-1 text-left">{section.label}</span>
+                  {section.badge !== '0' && section.badge !== 'Core' && (
+                    <span className="text-[10px] text-muted-foreground/60">{section.badge}</span>
+                  )}
                 </button>
               )
             })}
-          </div>
+          </nav>
         </div>
 
-        <div className="space-y-6">
+        {/* Mobile dropdown */}
+        <div className="md:hidden w-full mb-4">
+          <Select
+            value={activeSection}
+            onChange={e => setActiveSection(e.target.value as SettingsSection)}
+          >
+            {sections.map(s => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-6">
           {activeSection === 'general' && (
             <>
               <div className="space-y-1">

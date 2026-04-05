@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -76,9 +77,9 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 			alertService.Notify(projectID, iss, isNew)
 			go jira.CheckAndCreateTicket(context.Background(), queries, cfg.BaseURL, projectID, iss)
 		},
-		func(projectID uuid.UUID, iss db.Issue) {
-			go priority.Evaluate(context.Background(), queries, projectID, iss)
-			go tags.AutoTag(context.Background(), queries, projectID, iss)
+		func(projectID uuid.UUID, iss db.Issue, eventData json.RawMessage) {
+			go priority.Evaluate(context.Background(), queries, projectID, iss, eventData)
+			go tags.AutoTag(context.Background(), queries, projectID, iss, eventData)
 		},
 	)
 
