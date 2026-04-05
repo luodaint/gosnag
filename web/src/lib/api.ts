@@ -100,6 +100,17 @@ export const api = {
   deleteToken: (projectId: string, tokenId: string) =>
     request<void>(`/projects/${projectId}/tokens/${tokenId}`, { method: 'DELETE' }),
 
+  // Priority Rules
+  listPriorityRules: (projectId: string) => request<PriorityRule[]>(`/projects/${projectId}/priority-rules`),
+  createPriorityRule: (projectId: string, data: PriorityRuleData) =>
+    request<PriorityRule>(`/projects/${projectId}/priority-rules`, { method: 'POST', body: JSON.stringify(data) }),
+  updatePriorityRule: (projectId: string, ruleId: string, data: PriorityRuleData) =>
+    request<PriorityRule>(`/projects/${projectId}/priority-rules/${ruleId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePriorityRule: (projectId: string, ruleId: string) =>
+    request<void>(`/projects/${projectId}/priority-rules/${ruleId}`, { method: 'DELETE' }),
+  recalcPriority: (projectId: string) =>
+    request<{ recalculated: number }>(`/projects/${projectId}/priority-rules/recalc`, { method: 'POST' }),
+
   // Jira
   testJiraConnection: (projectId: string) =>
     request<{ ok: boolean; error?: string }>(`/projects/${projectId}/jira/test`, { method: 'POST' }),
@@ -187,6 +198,7 @@ export interface Issue {
   snooze_events_at_start: number
   jira_ticket_key: string | null
   jira_ticket_url: string | null
+  priority: number
   user_count?: number
   trend?: number[]
 }
@@ -237,6 +249,31 @@ export interface APIToken {
   last_used_at: string | null
   expires_at: string | null
   created_at: string
+}
+
+export interface PriorityRule {
+  id: string
+  project_id: string
+  name: string
+  rule_type: string
+  pattern: string
+  operator: string
+  threshold: number
+  points: number
+  enabled: boolean
+  position: number
+  created_at: string
+  updated_at: string
+}
+
+export type PriorityRuleData = {
+  name: string
+  rule_type: string
+  pattern: string
+  operator: string
+  threshold: number
+  points: number
+  enabled: boolean
 }
 
 export interface JiraRule {

@@ -75,6 +75,7 @@ type Issue struct {
 	SnoozeEventsAtStart  int32          `json:"snooze_events_at_start"`
 	JiraTicketKey        sql.NullString `json:"jira_ticket_key"`
 	JiraTicketUrl        sql.NullString `json:"jira_ticket_url"`
+	Priority             int32          `json:"priority"`
 }
 
 type IssueAlias struct {
@@ -96,6 +97,21 @@ type JiraRule struct {
 	TitlePattern string    `json:"title_pattern"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type PriorityRule struct {
+	ID        uuid.UUID `json:"id"`
+	ProjectID uuid.UUID `json:"project_id"`
+	Name      string    `json:"name"`
+	RuleType  string    `json:"rule_type"`
+	Pattern   string    `json:"pattern"`
+	Operator  string    `json:"operator"`
+	Threshold int32     `json:"threshold"`
+	Points    int32     `json:"points"`
+	Enabled   bool      `json:"enabled"`
+	Position  int32     `json:"position"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Project struct {

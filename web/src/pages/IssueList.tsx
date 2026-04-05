@@ -385,6 +385,7 @@ export default function IssueList() {
               <option value="last_seen">Last seen</option>
               <option value="first_seen">First seen</option>
               <option value="event_count">Events</option>
+              <option value="priority">Priority</option>
             </Select>
             <Link to={`/projects/${projectId}/settings`} className="md:hidden">
               <Button variant="outline" size="sm">
@@ -424,6 +425,7 @@ export default function IssueList() {
               </div>
               <div className="divide-y divide-border/60">
               {[...issues].sort((a, b) => {
+                if (sort === 'priority') return b.priority - a.priority
                 if (sort === 'event_count') return b.event_count - a.event_count
                 if (sort === 'first_seen') return new Date(b.first_seen).getTime() - new Date(a.first_seen).getTime()
                 return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime()
@@ -458,6 +460,17 @@ export default function IssueList() {
                       </Badge>
                       {issue.status === 'resolved' && issue.cooldown_until && (
                         <span className="text-xs text-muted-foreground font-mono">cooldown until {new Date(issue.cooldown_until).toLocaleString()}</span>
+                      )}
+                      {issue.priority !== 50 && (
+                        <span className={cn(
+                          'text-xs font-mono px-1.5 py-0.5 rounded',
+                          issue.priority > 75 ? 'bg-red-500/15 text-red-400' :
+                          issue.priority > 50 ? 'bg-amber-500/15 text-amber-400' :
+                          issue.priority > 25 ? 'bg-blue-500/15 text-blue-400' :
+                          'bg-muted text-muted-foreground'
+                        )}>
+                          P{issue.priority}
+                        </span>
                       )}
                     </div>
                     <p className="font-medium truncate">{issue.title}</p>

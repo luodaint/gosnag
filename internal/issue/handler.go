@@ -511,6 +511,7 @@ func issueJSON(i db.Issue) map[string]any {
 		"snooze_events_at_start": i.SnoozeEventsAtStart,
 		"jira_ticket_key":      nullString(i.JiraTicketKey),
 		"jira_ticket_url":      nullString(i.JiraTicketUrl),
+		"priority":             i.Priority,
 	}
 	return m
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/darkspock/gosnag/internal/ingest"
 	"github.com/darkspock/gosnag/internal/issue"
 	"github.com/darkspock/gosnag/internal/jira"
+	"github.com/darkspock/gosnag/internal/priority"
 	"github.com/darkspock/gosnag/internal/project"
 	"github.com/darkspock/gosnag/internal/user"
 	"github.com/darkspock/gosnag/web"
@@ -64,12 +65,14 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	userHandler := user.NewHandler(queries)
 	alertHandler := alert.NewHandler(queries)
 	jiraHandler := jira.NewHandler(queries, cfg)
+	priorityHandler := priority.NewHandler(queries)
 	oauthHandler := auth.NewOAuthHandler(queries, cfg)
 
 	alertService := alert.NewService(queries, cfg)
 	ingestHandler := ingest.NewHandler(queries, func(projectID uuid.UUID, iss db.Issue, isNew bool) {
 		alertService.Notify(projectID, iss, isNew)
 		go jira.CheckAndCreateTicket(context.Background(), queries, cfg.BaseURL, projectID, iss)
+		go priority.Evaluate(context.Background(), queries, projectID, iss)
 	})
 
 	r := chi.NewRouter()
@@ -135,6 +138,15 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 					r.With(auth.RequireAdmin).Post("/", jiraHandler.CreateRule)
 					r.With(auth.RequireAdmin).Put("/{rule_id}", jiraHandler.UpdateRule)
 					r.With(auth.RequireAdmin).Delete("/{rule_id}", jiraHandler.DeleteRule)
+				})
+
+				// Priority rules
+				r.Route("/priority-rules", func(r chi.Router) {
+					r.Get("/", priorityHandler.ListRules)
+					r.With(auth.RequireAdmin).Post("/", priorityHandler.CreateRule)
+					r.With(auth.RequireAdmin).Put("/{rule_id}", priorityHandler.UpdateRule)
+					r.With(auth.RequireAdmin).Delete("/{rule_id}", priorityHandler.DeleteRule)
+					r.With(auth.RequireAdmin).Post("/recalc", priorityHandler.RecalcAll)
 				})
 
 				// Alerts per project

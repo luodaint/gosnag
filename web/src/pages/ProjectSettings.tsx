@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type ProjectWithDSN, type AlertConfig, type APIToken, type JiraRule, type ProjectGroup } from '@/lib/api'
+import { api, type ProjectWithDSN, type AlertConfig, type APIToken, type JiraRule, type ProjectGroup, type PriorityRule } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
-import { Bell, Copy, Key, Pencil, Plus, Settings, ShieldAlert, Trash2, Workflow } from 'lucide-react'
+import { Bell, Copy, Gauge, Key, Pencil, Plus, Settings, ShieldAlert, Trash2, Workflow } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
 
@@ -24,7 +24,7 @@ const LEVEL_COLORS: Record<string, string> = {
   debug: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
 }
 
-type SettingsSection = 'general' | 'alerts' | 'tokens' | 'integrations' | 'danger'
+type SettingsSection = 'general' | 'alerts' | 'tokens' | 'priority' | 'integrations' | 'danger'
 
 export default function ProjectSettings() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -57,6 +57,17 @@ export default function ProjectSettings() {
   const [ruleMinUsers, setRuleMinUsers] = useState('')
   const [ruleTitlePattern, setRuleTitlePattern] = useState('')
   const [showDeleteRule, setShowDeleteRule] = useState<string | null>(null)
+  const [priorityRules, setPriorityRules] = useState<PriorityRule[]>([])
+  const [showPriorityRuleForm, setShowPriorityRuleForm] = useState(false)
+  const [editingPriorityRule, setEditingPriorityRule] = useState<PriorityRule | null>(null)
+  const [prRuleName, setPrRuleName] = useState('')
+  const [prRuleType, setPrRuleType] = useState('level_is')
+  const [prPattern, setPrPattern] = useState('')
+  const [prOperator, setPrOperator] = useState('gte')
+  const [prThreshold, setPrThreshold] = useState('')
+  const [prPoints, setPrPoints] = useState('')
+  const [showDeletePriorityRule, setShowDeletePriorityRule] = useState<string | null>(null)
+  const [recalcing, setRecalcing] = useState(false)
   const [allGroups, setAllGroups] = useState<ProjectGroup[]>([])
   const [selectedGroupId, setSelectedGroupId] = useState<string>('')
   const [name, setName] = useState('')
@@ -124,6 +135,7 @@ export default function ProjectSettings() {
       api.listTokens(projectId).then(setTokens),
       api.listJiraRules(projectId).then(setJiraRules),
       api.listGroups().then(setAllGroups),
+      api.listPriorityRules(projectId).then(setPriorityRules),
     ]).finally(() => setLoading(false))
   }, [projectId])
 
@@ -365,6 +377,94 @@ export default function ProjectSettings() {
     toast.success('Rule deleted')
   }
 
+  const RULE_TYPES = [
+    { value: 'level_is', label: 'Level is', needsPattern: true, needsThreshold: false },
+    { value: 'platform_is', label: 'Platform is', needsPattern: true, needsThreshold: false },
+    { value: 'title_contains', label: 'Title contains', needsPattern: true, needsThreshold: false },
+    { value: 'title_not_contains', label: 'Title does not contain', needsPattern: true, needsThreshold: false },
+    { value: 'total_events', label: 'Total events', needsPattern: false, needsThreshold: true },
+    { value: 'velocity_1h', label: 'Events per hour', needsPattern: false, needsThreshold: true },
+    { value: 'velocity_24h', label: 'Events per 24h', needsPattern: false, needsThreshold: true },
+    { value: 'user_count', label: 'Affected users', needsPattern: false, needsThreshold: true },
+  ]
+
+  const openAddPriorityRule = () => {
+    setEditingPriorityRule(null)
+    setPrRuleName('')
+    setPrRuleType('level_is')
+    setPrPattern('')
+    setPrOperator('gte')
+    setPrThreshold('')
+    setPrPoints('')
+    setShowPriorityRuleForm(true)
+  }
+
+  const openEditPriorityRule = (r: PriorityRule) => {
+    setEditingPriorityRule(r)
+    setPrRuleName(r.name)
+    setPrRuleType(r.rule_type)
+    setPrPattern(r.pattern)
+    setPrOperator(r.operator)
+    setPrThreshold(r.threshold > 0 ? String(r.threshold) : '')
+    setPrPoints(String(r.points))
+    setShowPriorityRuleForm(true)
+  }
+
+  const handleSavePriorityRule = async () => {
+    if (!projectId) return
+    const data = {
+      name: prRuleName,
+      rule_type: prRuleType,
+      pattern: prPattern,
+      operator: prOperator,
+      threshold: parseInt(prThreshold) || 0,
+      points: parseInt(prPoints) || 0,
+      enabled: editingPriorityRule ? editingPriorityRule.enabled : true,
+    }
+    try {
+      if (editingPriorityRule) {
+        await api.updatePriorityRule(projectId, editingPriorityRule.id, data)
+      } else {
+        await api.createPriorityRule(projectId, data)
+      }
+      setPriorityRules(await api.listPriorityRules(projectId))
+      setShowPriorityRuleForm(false)
+      toast.success(editingPriorityRule ? 'Rule updated' : 'Rule created')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save rule')
+    }
+  }
+
+  const handleTogglePriorityRule = async (r: PriorityRule) => {
+    if (!projectId) return
+    await api.updatePriorityRule(projectId, r.id, {
+      ...r, enabled: !r.enabled,
+    })
+    setPriorityRules(await api.listPriorityRules(projectId))
+  }
+
+  const handleDeletePriorityRule = async (ruleId: string) => {
+    if (!projectId) return
+    await api.deletePriorityRule(projectId, ruleId)
+    setPriorityRules(await api.listPriorityRules(projectId))
+    toast.success('Rule deleted')
+  }
+
+  const handleRecalc = async () => {
+    if (!projectId) return
+    setRecalcing(true)
+    try {
+      const result = await api.recalcPriority(projectId)
+      toast.success(`Recalculated ${result.recalculated} issues`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to recalculate')
+    } finally {
+      setRecalcing(false)
+    }
+  }
+
+  const currentRuleType = RULE_TYPES.find(t => t.value === prRuleType)
+
   const handleCopyToken = () => {
     if (newToken) {
       navigator.clipboard.writeText(newToken)
@@ -406,6 +506,12 @@ export default function ProjectSettings() {
       label: 'API Tokens',
       badge: `${tokens.length}`,
       icon: Key,
+    },
+    {
+      id: 'priority' as const,
+      label: 'Priority',
+      badge: `${priorityRules.length}`,
+      icon: Gauge,
     },
     ...(isAdmin
       ? [
@@ -771,6 +877,174 @@ export default function ProjectSettings() {
                   )}
                 </CardContent>
               </Card>
+            </>
+          )}
+
+          {activeSection === 'priority' && (
+            <>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Priority</p>
+                <h2 className="text-xl font-semibold">Priority scoring rules</h2>
+                <p className="text-sm text-muted-foreground">
+                  Define rules that add or subtract points to calculate an issue's priority score (0–100). Base score is 50.
+                </p>
+              </div>
+
+              <Card>
+                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <CardTitle className="text-base">Rules</CardTitle>
+                  <div className="flex gap-2">
+                    {isAdmin && (
+                      <Button size="sm" variant="outline" onClick={handleRecalc} disabled={recalcing}>
+                        {recalcing ? 'Recalculating...' : 'Recalculate All'}
+                      </Button>
+                    )}
+                    {isAdmin && (
+                      <Button size="sm" variant="outline" onClick={openAddPriorityRule}>
+                        <Plus className="h-4 w-4 mr-1" /> Add Rule
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {priorityRules.length === 0 ? (
+                    <div className="py-8 text-center text-muted-foreground">
+                      <p className="text-sm">No priority rules configured.</p>
+                      <p className="mt-1 text-xs text-muted-foreground/60">All issues will have the default priority of 50.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {priorityRules.map(r => (
+                        <div key={r.id} className="rounded-md border p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{r.name}</span>
+                              <button
+                                onClick={() => handleTogglePriorityRule(r)}
+                                className={cn(
+                                  'text-xs px-1.5 py-0.5 rounded cursor-pointer transition-colors',
+                                  r.enabled ? 'bg-emerald-500/15 text-emerald-400' : 'bg-muted text-muted-foreground'
+                                )}
+                              >
+                                {r.enabled ? 'Active' : 'Disabled'}
+                              </button>
+                              <span className={cn(
+                                'text-xs font-mono px-1.5 py-0.5 rounded',
+                                r.points > 0 ? 'bg-red-500/15 text-red-400' : 'bg-blue-500/15 text-blue-400'
+                              )}>
+                                {r.points > 0 ? '+' : ''}{r.points}
+                              </span>
+                            </div>
+                            {isAdmin && (
+                              <div className="flex items-center gap-1">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditPriorityRule(r)}>
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Edit rule</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowDeletePriorityRule(r.id)}>
+                                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Delete rule</TooltipContent>
+                                </Tooltip>
+                              </div>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {RULE_TYPES.find(t => t.value === r.rule_type)?.label || r.rule_type}
+                            {r.pattern ? `: ${r.pattern}` : ''}
+                            {r.threshold > 0 ? ` ${r.operator || '≥'} ${r.threshold}` : ''}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Priority Rule Form Dialog */}
+              <Dialog open={showPriorityRuleForm} onOpenChange={setShowPriorityRuleForm}>
+                <DialogContent>
+                  <DialogTitle>{editingPriorityRule ? 'Edit Rule' : 'Add Rule'}</DialogTitle>
+                  <DialogDescription className="sr-only">Configure priority scoring rule</DialogDescription>
+                  <div className="mt-4 space-y-4">
+                    <div>
+                      <label className="text-sm font-medium">Name</label>
+                      <Input value={prRuleName} onChange={e => setPrRuleName(e.target.value)} placeholder="e.g. Fatal errors" className="mt-1" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Type</label>
+                      <Select value={prRuleType} onChange={e => setPrRuleType(e.target.value)} className="mt-1">
+                        {RULE_TYPES.map(t => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </Select>
+                    </div>
+                    {currentRuleType?.needsPattern && (
+                      <div>
+                        <label className="text-sm font-medium">
+                          {prRuleType === 'level_is' ? 'Level' : prRuleType === 'platform_is' ? 'Platform' : 'Pattern'}
+                        </label>
+                        {prRuleType === 'level_is' ? (
+                          <Select value={prPattern} onChange={e => setPrPattern(e.target.value)} className="mt-1">
+                            <option value="fatal">fatal</option>
+                            <option value="error">error</option>
+                            <option value="warning">warning</option>
+                            <option value="info">info</option>
+                            <option value="debug">debug</option>
+                          </Select>
+                        ) : (
+                          <Input value={prPattern} onChange={e => setPrPattern(e.target.value)} placeholder={prRuleType.includes('title') ? 'e.g. database|timeout' : 'e.g. php'} className="mt-1" />
+                        )}
+                      </div>
+                    )}
+                    {currentRuleType?.needsThreshold && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-sm font-medium">Operator</label>
+                          <Select value={prOperator} onChange={e => setPrOperator(e.target.value)} className="mt-1">
+                            <option value="gte">≥ greater or equal</option>
+                            <option value="gt">&gt; greater than</option>
+                            <option value="lte">≤ less or equal</option>
+                            <option value="lt">&lt; less than</option>
+                            <option value="eq">= equals</option>
+                          </Select>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Threshold</label>
+                          <Input type="number" value={prThreshold} onChange={e => setPrThreshold(e.target.value)} placeholder="e.g. 10" className="mt-1" />
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <label className="text-sm font-medium">Points</label>
+                      <Input type="number" value={prPoints} onChange={e => setPrPoints(e.target.value)} placeholder="e.g. 20 or -10" className="mt-1" />
+                      <p className="mt-1 text-xs text-muted-foreground">Positive = higher priority, negative = lower. Base score is 50, clamped to 0–100.</p>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setShowPriorityRuleForm(false)}>Cancel</Button>
+                      <Button onClick={handleSavePriorityRule} disabled={!prRuleName.trim() || !prPoints}>{editingPriorityRule ? 'Save' : 'Add'}</Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* Delete Priority Rule Confirm */}
+              <ConfirmDialog
+                open={!!showDeletePriorityRule}
+                onOpenChange={open => { if (!open) setShowDeletePriorityRule(null) }}
+                title="Delete Rule"
+                description="This priority rule will be permanently deleted."
+                confirmLabel="Delete"
+                variant="destructive"
+                onConfirm={() => { if (showDeletePriorityRule) handleDeletePriorityRule(showDeletePriorityRule) }}
+              />
             </>
           )}
 
