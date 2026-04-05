@@ -685,6 +685,7 @@ export default function ProjectSettings() {
                 <h2 className="text-xl font-semibold">Project-scoped access</h2>
                 <p className="text-sm text-muted-foreground">
                   Create scoped credentials for external systems without mixing them into the main settings form.
+                  {' '}<a href="https://github.com/darkspock/GoSnag/blob/main/API.md" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">API documentation &rarr;</a>
                 </p>
               </div>
 
