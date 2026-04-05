@@ -104,9 +104,14 @@ export default function Projects() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Projects</h1>
         {user?.role === 'admin' && (
-          <Button onClick={() => setShowCreate(true)}>
-            <Plus className="h-4 w-4 mr-1" /> New Project
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => { setGroupName(''); setShowCreateGroup(true) }}>
+              <Plus className="h-4 w-4 mr-1" /> New Group
+            </Button>
+            <Button onClick={() => setShowCreate(true)}>
+              <Plus className="h-4 w-4 mr-1" /> New Project
+            </Button>
+          </div>
         )}
       </div>
 
