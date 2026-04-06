@@ -232,7 +232,7 @@ const getProjectStats = `-- name: GetProjectStats :many
 SELECT
   project_id,
   count(*)::int AS total_issues,
-  count(*) FILTER (WHERE status IN ('open', 'reopened'))::int AS open_issues,
+  count(*) FILTER (WHERE status IN ('open', 'reopened') AND level IN ('error', 'fatal'))::int AS open_issues,
   max(last_seen) AS latest_event
 FROM issues
 GROUP BY project_id
