@@ -13,9 +13,7 @@ import { Breadcrumb } from '@/components/ui/breadcrumb'
 import { Bell, Copy, Gauge, Key, Pencil, Plus, Settings, ShieldAlert, Tag, Trash2, Workflow } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
-import { ConditionBuilder, type ConditionGroup } from '@/components/ui/condition-builder'
-
-const ALL_LEVELS = ['fatal', 'error', 'warning', 'info', 'debug'] as const
+import { ConditionBuilder, type ConditionGroup, type ConditionNode } from '@/components/ui/condition-builder'
 
 function legacyToConditions(a: { level_filter?: string; title_pattern?: string; exclude_pattern?: string; min_events?: number; min_velocity_1h?: number }): ConditionGroup {
   const conds: ConditionNode[] = []
@@ -41,8 +39,6 @@ function legacyToConditions(a: { level_filter?: string; title_pattern?: string; 
   }
   return { operator: 'and', conditions: conds }
 }
-
-type ConditionNode = { type?: string; op?: string; value?: unknown; operator?: string; conditions?: ConditionNode[] }
 
 const LEVEL_COLORS: Record<string, string> = {
   fatal: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -125,11 +121,6 @@ export default function ProjectSettings() {
   const [editingAlert, setEditingAlert] = useState<AlertConfig | null>(null)
   const [alertType, setAlertType] = useState('email')
   const [alertConfig, setAlertConfig] = useState('')
-  const [alertLevels, setAlertLevels] = useState<string[]>([])
-  const [alertPattern, setAlertPattern] = useState('')
-  const [alertMinEvents, setAlertMinEvents] = useState('')
-  const [alertMinVelocity, setAlertMinVelocity] = useState('')
-  const [alertExcludePattern, setAlertExcludePattern] = useState('')
   const [alertConditions, setAlertConditions] = useState<ConditionGroup>({ operator: 'and', conditions: [] })
 
   const isAdmin = user?.role === 'admin'
@@ -235,11 +226,6 @@ export default function ProjectSettings() {
     setEditingAlert(null)
     setAlertType('email')
     setAlertConfig('')
-    setAlertLevels([])
-    setAlertPattern('')
-    setAlertMinEvents('')
-    setAlertMinVelocity('')
-    setAlertExcludePattern('')
     setAlertConditions({ operator: 'and', conditions: [] })
     setShowAlertForm(true)
   }
@@ -252,11 +238,6 @@ export default function ProjectSettings() {
         ? (a.config as { recipients?: string[] }).recipients?.join(', ') || ''
         : (a.config as { webhook_url?: string }).webhook_url || ''
     )
-    setAlertLevels(a.level_filter ? a.level_filter.split(',') : [])
-    setAlertPattern(a.title_pattern || '')
-    setAlertMinEvents(a.min_events ? String(a.min_events) : '')
-    setAlertMinVelocity(a.min_velocity_1h ? String(a.min_velocity_1h) : '')
-    setAlertExcludePattern(a.exclude_pattern || '')
     // If conditions JSONB exists, use it; otherwise auto-convert legacy fields
     if (a.conditions) {
       setAlertConditions(a.conditions as unknown as ConditionGroup)
@@ -264,12 +245,6 @@ export default function ProjectSettings() {
       setAlertConditions(legacyToConditions(a))
     }
     setShowAlertForm(true)
-  }
-
-  const toggleLevel = (level: string) => {
-    setAlertLevels(prev =>
-      prev.includes(level) ? prev.filter(l => l !== level) : [...prev, level]
-    )
   }
 
   const handleSaveAlert = async () => {
