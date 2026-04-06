@@ -17,6 +17,33 @@ import { ConditionBuilder, type ConditionGroup } from '@/components/ui/condition
 
 const ALL_LEVELS = ['fatal', 'error', 'warning', 'info', 'debug'] as const
 
+function legacyToConditions(a: { level_filter?: string; title_pattern?: string; exclude_pattern?: string; min_events?: number; min_velocity_1h?: number }): ConditionGroup {
+  const conds: ConditionNode[] = []
+  if (a.level_filter) {
+    const levels = a.level_filter.split(',').map(s => s.trim()).filter(Boolean)
+    if (levels.length === 1) {
+      conds.push({ type: 'level', op: 'eq', value: levels[0] })
+    } else if (levels.length > 1) {
+      conds.push({ type: 'level', op: 'in', value: levels })
+    }
+  }
+  if (a.title_pattern) {
+    conds.push({ type: 'title', op: 'contains', value: a.title_pattern })
+  }
+  if (a.exclude_pattern) {
+    conds.push({ type: 'title', op: 'not_contains', value: a.exclude_pattern })
+  }
+  if (a.min_events && a.min_events > 0) {
+    conds.push({ type: 'total_events', op: 'gte', value: a.min_events })
+  }
+  if (a.min_velocity_1h && a.min_velocity_1h > 0) {
+    conds.push({ type: 'velocity_1h', op: 'gte', value: a.min_velocity_1h })
+  }
+  return { operator: 'and', conditions: conds }
+}
+
+type ConditionNode = { type?: string; op?: string; value?: unknown; operator?: string; conditions?: ConditionNode[] }
+
 const LEVEL_COLORS: Record<string, string> = {
   fatal: 'bg-red-500/20 text-red-400 border-red-500/30',
   error: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -230,7 +257,12 @@ export default function ProjectSettings() {
     setAlertMinEvents(a.min_events ? String(a.min_events) : '')
     setAlertMinVelocity(a.min_velocity_1h ? String(a.min_velocity_1h) : '')
     setAlertExcludePattern(a.exclude_pattern || '')
-    setAlertConditions(a.conditions ? a.conditions as unknown as ConditionGroup : { operator: 'and', conditions: [] })
+    // If conditions JSONB exists, use it; otherwise auto-convert legacy fields
+    if (a.conditions) {
+      setAlertConditions(a.conditions as unknown as ConditionGroup)
+    } else {
+      setAlertConditions(legacyToConditions(a))
+    }
     setShowAlertForm(true)
   }
 
@@ -858,7 +890,11 @@ export default function ProjectSettings() {
                           </div>
                           <p className="mt-1 truncate text-xs text-muted-foreground">{formatAlertDestination(a)}</p>
                           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                            {a.level_filter ? (
+                            {a.conditions && (a.conditions as unknown as ConditionGroup).conditions?.length > 0 ? (
+                              <span className="text-xs text-muted-foreground">
+                                {(a.conditions as unknown as ConditionGroup).conditions.length} condition{(a.conditions as unknown as ConditionGroup).conditions.length !== 1 ? 's' : ''} ({(a.conditions as unknown as ConditionGroup).operator?.toUpperCase()})
+                              </span>
+                            ) : a.level_filter ? (
                               a.level_filter.split(',').map(l => (
                                 <span key={l} className={cn('rounded border px-1.5 py-0.5 text-xs', LEVEL_COLORS[l])}>
                                   {l}
@@ -867,7 +903,7 @@ export default function ProjectSettings() {
                             ) : (
                               <span className="text-xs text-muted-foreground">All levels</span>
                             )}
-                            {a.title_pattern && (
+                            {!a.conditions && a.title_pattern && (
                               <>
                                 <span className="mx-0.5 text-xs text-muted-foreground/40">&middot;</span>
                                 <span className="font-mono text-xs text-muted-foreground">contains "{a.title_pattern}"</span>
