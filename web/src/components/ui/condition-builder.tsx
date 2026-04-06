@@ -286,46 +286,47 @@ function LeafCondition({
   }
 
   return (
-    <div className="flex items-center gap-2 ml-4">
-      <Select
-        value={node.type || ''}
-        onChange={(e) => handleTypeChange(e.target.value)}
-        className="w-40 text-xs"
-      >
-        {types.map(([key, info]) => (
-          <option key={key} value={key}>{info.label}</option>
-        ))}
-      </Select>
+    <div className="ml-4 rounded-md border border-border/40 bg-muted/20 p-2 space-y-2">
+      <div className="flex items-center gap-2">
+        <Select
+          value={node.type || ''}
+          onChange={(e) => handleTypeChange(e.target.value)}
+          className="flex-1 text-xs"
+        >
+          {types.map(([key, info]) => (
+            <option key={key} value={key}>{info.label}</option>
+          ))}
+        </Select>
 
-      <Select
-        value={node.op || ''}
-        onChange={(e) => handleOpChange(e.target.value)}
-        className="w-32 text-xs"
-      >
-        {operators.map(op => (
-          <option key={op.value} value={op.value}>{op.label}</option>
-        ))}
-      </Select>
+        <Select
+          value={node.op || ''}
+          onChange={(e) => handleOpChange(e.target.value)}
+          className="flex-1 text-xs"
+        >
+          {operators.map(op => (
+            <option key={op.value} value={op.value}>{op.label}</option>
+          ))}
+        </Select>
 
+        <button
+          type="button"
+          onClick={onRemove}
+          className="p-1 text-muted-foreground hover:text-destructive transition-colors shrink-0"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
       <Input
         value={displayValue()}
         onChange={(e) => handleValueChange(e.target.value)}
         placeholder={
           typeInfo?.category === 'number' ? 'e.g. 10'
-          : (node.op === 'in' || node.op === 'not_in') ? 'e.g. error, fatal'
-          : 'e.g. pattern'
+          : (node.op === 'in' || node.op === 'not_in') ? 'e.g. error, fatal (comma separated)'
+          : 'e.g. pattern or regex'
         }
-        className="flex-1 text-xs"
+        className="w-full text-xs"
         type={typeInfo?.category === 'number' ? 'number' : 'text'}
       />
-
-      <button
-        type="button"
-        onClick={onRemove}
-        className="p-1 text-muted-foreground hover:text-destructive transition-colors shrink-0"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
     </div>
   )
 }

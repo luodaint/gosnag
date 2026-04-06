@@ -1564,7 +1564,7 @@ export default function ProjectSettings() {
 
       {/* Add/Edit Alert Dialog */}
       <Dialog open={showAlertForm} onOpenChange={setShowAlertForm}>
-        <DialogContent>
+        <DialogContent className="max-w-xl">
           <DialogTitle>{editingAlert ? 'Edit Alert' : 'Add Alert'}</DialogTitle>
           <DialogDescription className="sr-only">Configure alert settings</DialogDescription>
           <div className="mt-4 space-y-4">
