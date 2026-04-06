@@ -56,7 +56,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, configs)
+	writeJSON(w, http.StatusOK, toSafeAlerts(configs))
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +101,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, config)
+	writeJSON(w, http.StatusCreated, toSafeAlert(config))
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +157,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, config)
+	writeJSON(w, http.StatusOK, toSafeAlert(config))
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +204,37 @@ func validateAlertConfig(alertType string, raw json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+func toSafeAlert(a db.AlertConfig) map[string]any {
+	m := map[string]any{
+		"id":              a.ID,
+		"project_id":      a.ProjectID,
+		"alert_type":      a.AlertType,
+		"config":          a.Config,
+		"enabled":         a.Enabled,
+		"level_filter":    a.LevelFilter,
+		"title_pattern":   a.TitlePattern,
+		"min_events":      a.MinEvents,
+		"min_velocity_1h": a.MinVelocity1h,
+		"exclude_pattern": a.ExcludePattern,
+		"created_at":      a.CreatedAt,
+		"updated_at":      a.UpdatedAt,
+	}
+	if a.Conditions.Valid {
+		m["conditions"] = a.Conditions.RawMessage
+	} else {
+		m["conditions"] = nil
+	}
+	return m
+}
+
+func toSafeAlerts(configs []db.AlertConfig) []map[string]any {
+	result := make([]map[string]any, len(configs))
+	for i, c := range configs {
+		result[i] = toSafeAlert(c)
+	}
+	return result
 }
 
 func toNullJSON(raw json.RawMessage) pqtype.NullRawMessage {

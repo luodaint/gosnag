@@ -249,10 +249,20 @@ export default function ProjectSettings() {
       const hasConditions = alertConditions.conditions.length > 0
       const conditionsPayload = hasConditions ? alertConditions : undefined
 
+      // Always send legacy fields to preserve them for alerts without conditions
+      const legacyFields = {
+        level_filter: editingAlert?.level_filter || '',
+        title_pattern: editingAlert?.title_pattern || '',
+        min_events: editingAlert?.min_events || 0,
+        min_velocity_1h: editingAlert?.min_velocity_1h || 0,
+        exclude_pattern: editingAlert?.exclude_pattern || '',
+      }
+
       if (editingAlert) {
         await api.updateAlert(projectId, editingAlert.id, {
           config,
           enabled: editingAlert.enabled,
+          ...legacyFields,
           conditions: conditionsPayload,
         })
       } else {
@@ -260,6 +270,7 @@ export default function ProjectSettings() {
           alert_type: alertType,
           config,
           enabled: true,
+          ...legacyFields,
           conditions: conditionsPayload,
         })
       }
@@ -1572,6 +1583,7 @@ export default function ProjectSettings() {
               <ConditionBuilder
                 value={alertConditions}
                 onChange={setAlertConditions}
+                availableTypes={['level', 'platform', 'title', 'total_events', 'velocity_1h', 'velocity_24h', 'user_count']}
               />
             </div>
             <div className="flex justify-end gap-2">
