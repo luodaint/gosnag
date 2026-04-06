@@ -294,13 +294,24 @@ export default function IssueList() {
 
   const warningsFilters = [
     { label: 'Introduced Today', status: '', special: 'today' },
+    { label: 'Open', status: 'open' },
+    { label: 'Assigned to me', status: '', special: 'assigned_to_me', indent: true },
+    { label: 'Assigned to anyone', status: '', special: 'assigned_any', indent: true },
+    { label: 'Reopened', status: 'reopened' },
+    { label: 'Resolved', status: 'resolved' },
     { label: 'Snoozed', status: 'snoozed' },
     { label: 'Ignored', status: 'ignored' },
   ]
 
   const infoFilters = [
     { label: 'Introduced Today', status: '', special: 'today' },
+    { label: 'Open', status: 'open' },
+    { label: 'Assigned to me', status: '', special: 'assigned_to_me', indent: true },
+    { label: 'Assigned to anyone', status: '', special: 'assigned_any', indent: true },
+    { label: 'Reopened', status: 'reopened' },
+    { label: 'Resolved', status: 'resolved' },
     { label: 'Snoozed', status: 'snoozed' },
+    { label: 'Ignored', status: 'ignored' },
   ]
 
   return (
@@ -493,6 +504,14 @@ export default function IssueList() {
                       <span className="font-mono text-xs">{issue.platform}</span>
                       <span className="mx-1.5 opacity-40">&middot;</span>
                       {fetchedAt ? formatRelativeTime(issue.last_seen, fetchedAt) : new Date(issue.last_seen).toLocaleString()}
+                      <span className="mx-1.5 opacity-40">&middot;</span>
+                      <span className="text-xs">first {fetchedAt ? formatRelativeTime(issue.first_seen, fetchedAt) : new Date(issue.first_seen).toLocaleString()}</span>
+                      <span className="sm:hidden">
+                        <span className="mx-1.5 opacity-40">&middot;</span>
+                        <span className="font-mono text-xs">{issue.event_count} ev</span>
+                        <span className="mx-1.5 opacity-40">&middot;</span>
+                        <span className="font-mono text-xs">{issue.user_count || 0} usr</span>
+                      </span>
                     </p>
                   </div>
                   <div className="w-16 text-right ml-4 shrink-0 hidden sm:block">
