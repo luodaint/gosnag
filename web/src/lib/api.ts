@@ -142,9 +142,9 @@ export const api = {
 
   // Alerts
   listAlerts: (projectId: string) => request<AlertConfig[]>(`/projects/${projectId}/alerts`),
-  createAlert: (projectId: string, data: { alert_type: string; config: object; enabled: boolean; level_filter?: string; title_pattern?: string; min_events?: number; min_velocity_1h?: number; exclude_pattern?: string }) =>
+  createAlert: (projectId: string, data: { alert_type: string; config: object; enabled: boolean; level_filter?: string; title_pattern?: string; min_events?: number; min_velocity_1h?: number; exclude_pattern?: string; conditions?: object }) =>
     request<AlertConfig>(`/projects/${projectId}/alerts`, { method: 'POST', body: JSON.stringify(data) }),
-  updateAlert: (projectId: string, alertId: string, data: { config: object; enabled: boolean; level_filter?: string; title_pattern?: string; min_events?: number; min_velocity_1h?: number; exclude_pattern?: string }) =>
+  updateAlert: (projectId: string, alertId: string, data: { config: object; enabled: boolean; level_filter?: string; title_pattern?: string; min_events?: number; min_velocity_1h?: number; exclude_pattern?: string; conditions?: object }) =>
     request<AlertConfig>(`/projects/${projectId}/alerts/${alertId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAlert: (projectId: string, alertId: string) =>
     request<void>(`/projects/${projectId}/alerts/${alertId}`, { method: 'DELETE' }),
@@ -334,5 +334,6 @@ export interface AlertConfig {
   min_events: number
   min_velocity_1h: number
   exclude_pattern: string
+  conditions: object | null
   created_at: string
 }

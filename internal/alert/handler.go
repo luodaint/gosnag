@@ -9,6 +9,7 @@ import (
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 type Handler struct {
@@ -28,6 +29,7 @@ type CreateAlertRequest struct {
 	MinEvents      int32           `json:"min_events"`
 	MinVelocity1h  int32           `json:"min_velocity_1h"`
 	ExcludePattern string          `json:"exclude_pattern"`
+	Conditions     json.RawMessage `json:"conditions,omitempty"`
 }
 
 type UpdateAlertRequest struct {
@@ -38,6 +40,7 @@ type UpdateAlertRequest struct {
 	MinEvents      int32           `json:"min_events"`
 	MinVelocity1h  int32           `json:"min_velocity_1h"`
 	ExcludePattern string          `json:"exclude_pattern"`
+	Conditions     json.RawMessage `json:"conditions,omitempty"`
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +94,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		MinEvents:      req.MinEvents,
 		MinVelocity1h:  req.MinVelocity1h,
 		ExcludePattern: req.ExcludePattern,
+		Conditions:     toNullJSON(req.Conditions),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create alert config")
@@ -142,6 +146,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		MinEvents:      req.MinEvents,
 		MinVelocity1h:  req.MinVelocity1h,
 		ExcludePattern: req.ExcludePattern,
+		Conditions:     toNullJSON(req.Conditions),
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -199,6 +204,13 @@ func validateAlertConfig(alertType string, raw json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+func toNullJSON(raw json.RawMessage) pqtype.NullRawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return pqtype.NullRawMessage{}
+	}
+	return pqtype.NullRawMessage{RawMessage: raw, Valid: true}
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

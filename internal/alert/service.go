@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/google/uuid"
@@ -110,24 +111,36 @@ func (s *Service) Notify(projectID uuid.UUID, issue db.Issue, isNew bool) {
 		action = "Reopened issue"
 	}
 
-	// Lazy-load velocity only if any rule needs it
-	var velocity1h *int32
-	for _, ac := range configs {
-		if !matchesAlert(ac, issue) {
-			continue
-		}
+	// Build a shared eval context (lazy-loads velocity/user_count on demand)
+	loader := &dbLoader{queries: s.queries, ctx: ctx}
+	evalCtx := conditions.NewEvalContext(conditions.IssueData{
+		ID:         issue.ID,
+		Title:      issue.Title,
+		Level:      issue.Level,
+		Platform:   issue.Platform,
+		EventCount: issue.EventCount,
+	}, "", loader)
 
-		// Velocity check: only query DB if rule requires it
-		if ac.MinVelocity1h > 0 {
-			if velocity1h == nil {
-				v, err := s.queries.GetIssueVelocity1h(ctx, issue.ID)
-				if err != nil {
-					v = 0
-				}
-				velocity1h = &v
-			}
-			if *velocity1h < ac.MinVelocity1h {
+	for _, ac := range configs {
+		// New engine: if conditions JSONB is set, use it
+		if ac.Conditions.Valid {
+			var group conditions.Group
+			if err := json.Unmarshal(ac.Conditions.RawMessage, &group); err != nil {
+				slog.Error("invalid conditions JSON", "error", err, "alert_id", ac.ID)
 				continue
+			}
+			if !conditions.Evaluate(group, evalCtx) {
+				continue
+			}
+		} else {
+			// Legacy path: flat columns
+			if !matchesAlert(ac, issue) {
+				continue
+			}
+			if ac.MinVelocity1h > 0 {
+				if evalCtx.Velocity1h() < ac.MinVelocity1h {
+					continue
+				}
 			}
 		}
 
@@ -160,4 +173,23 @@ func (s *Service) CleanupDebounce() {
 			delete(s.debounce, k)
 		}
 	}
+}
+
+// dbLoader implements conditions.DataLoader using DB queries.
+type dbLoader struct {
+	queries *db.Queries
+	ctx     context.Context
+}
+
+func (l *dbLoader) GetVelocity1h(issueID uuid.UUID) (int32, error) {
+	return l.queries.GetIssueVelocity1h(l.ctx, issueID)
+}
+
+func (l *dbLoader) GetVelocity24h(issueID uuid.UUID) (int32, error) {
+	return l.queries.GetIssueVelocity24h(l.ctx, issueID)
+}
+
+func (l *dbLoader) GetUserCount(issueID uuid.UUID) (int32, error) {
+	count, err := l.queries.GetIssueUserCount(l.ctx, issueID)
+	return int32(count), err
 }

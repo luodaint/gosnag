@@ -13,6 +13,7 @@ import { Breadcrumb } from '@/components/ui/breadcrumb'
 import { Bell, Copy, Gauge, Key, Pencil, Plus, Settings, ShieldAlert, Tag, Trash2, Workflow } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
+import { ConditionBuilder, type ConditionGroup } from '@/components/ui/condition-builder'
 
 const ALL_LEVELS = ['fatal', 'error', 'warning', 'info', 'debug'] as const
 
@@ -102,6 +103,7 @@ export default function ProjectSettings() {
   const [alertMinEvents, setAlertMinEvents] = useState('')
   const [alertMinVelocity, setAlertMinVelocity] = useState('')
   const [alertExcludePattern, setAlertExcludePattern] = useState('')
+  const [alertConditions, setAlertConditions] = useState<ConditionGroup>({ operator: 'and', conditions: [] })
 
   const isAdmin = user?.role === 'admin'
 
@@ -211,6 +213,7 @@ export default function ProjectSettings() {
     setAlertMinEvents('')
     setAlertMinVelocity('')
     setAlertExcludePattern('')
+    setAlertConditions({ operator: 'and', conditions: [] })
     setShowAlertForm(true)
   }
 
@@ -227,6 +230,7 @@ export default function ProjectSettings() {
     setAlertMinEvents(a.min_events ? String(a.min_events) : '')
     setAlertMinVelocity(a.min_velocity_1h ? String(a.min_velocity_1h) : '')
     setAlertExcludePattern(a.exclude_pattern || '')
+    setAlertConditions(a.conditions ? a.conditions as unknown as ConditionGroup : { operator: 'and', conditions: [] })
     setShowAlertForm(true)
   }
 
@@ -242,28 +246,21 @@ export default function ProjectSettings() {
       const config = alertType === 'email'
         ? { recipients: alertConfig.split(',').map(s => s.trim()).filter(Boolean) }
         : { webhook_url: alertConfig.trim() }
-      const levelFilter = alertLevels.join(',')
+      const hasConditions = alertConditions.conditions.length > 0
+      const conditionsPayload = hasConditions ? alertConditions : undefined
 
       if (editingAlert) {
         await api.updateAlert(projectId, editingAlert.id, {
           config,
           enabled: editingAlert.enabled,
-          level_filter: levelFilter,
-          title_pattern: alertPattern,
-          min_events: parseInt(alertMinEvents) || 0,
-          min_velocity_1h: parseInt(alertMinVelocity) || 0,
-          exclude_pattern: alertExcludePattern,
+          conditions: conditionsPayload,
         })
       } else {
         await api.createAlert(projectId, {
           alert_type: alertType,
           config,
           enabled: true,
-          level_filter: levelFilter,
-          title_pattern: alertPattern,
-          min_events: parseInt(alertMinEvents) || 0,
-          min_velocity_1h: parseInt(alertMinVelocity) || 0,
-          exclude_pattern: alertExcludePattern,
+          conditions: conditionsPayload,
         })
       }
       setAlerts(await api.listAlerts(projectId))
@@ -287,6 +284,7 @@ export default function ProjectSettings() {
       min_events: a.min_events || 0,
       min_velocity_1h: a.min_velocity_1h || 0,
       exclude_pattern: a.exclude_pattern || '',
+      conditions: a.conditions || undefined,
     })
     setAlerts(await api.listAlerts(projectId))
   }
@@ -1569,68 +1567,12 @@ export default function ProjectSettings() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium">Levels</label>
-              <p className="text-xs text-muted-foreground mb-2">Select which levels trigger this alert. None selected = all levels.</p>
-              <div className="flex flex-wrap gap-2">
-                {ALL_LEVELS.map(level => (
-                  <button
-                    key={level}
-                    onClick={() => toggleLevel(level)}
-                    className={cn(
-                      'text-xs px-2.5 py-1.5 rounded border transition-colors',
-                      alertLevels.includes(level)
-                        ? LEVEL_COLORS[level]
-                        : 'border-border/60 text-muted-foreground hover:text-foreground hover:border-border'
-                    )}
-                  >
-                    {level}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-sm font-medium">Title filter (include)</label>
-              <p className="text-xs text-muted-foreground mb-1">Only alert when the issue title matches. Leave empty for all issues.</p>
-              <Input
-                value={alertPattern}
-                onChange={e => setAlertPattern(e.target.value)}
-                placeholder="e.g. database or ^Fatal.*timeout$"
-                className="mt-1"
+              <label className="text-sm font-medium">Conditions</label>
+              <p className="text-xs text-muted-foreground mb-2">Define when this alert triggers. No conditions = always triggers on new/reopened issues.</p>
+              <ConditionBuilder
+                value={alertConditions}
+                onChange={setAlertConditions}
               />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Title filter (exclude)</label>
-              <p className="text-xs text-muted-foreground mb-1">Suppress alert when the issue title matches this pattern.</p>
-              <Input
-                value={alertExcludePattern}
-                onChange={e => setAlertExcludePattern(e.target.value)}
-                placeholder="e.g. HealthCheck or ^Warning.*deprecated"
-                className="mt-1"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium">Min total events</label>
-                <p className="text-xs text-muted-foreground mb-1">Only alert if issue has at least this many events.</p>
-                <Input
-                  type="number"
-                  value={alertMinEvents}
-                  onChange={e => setAlertMinEvents(e.target.value)}
-                  placeholder="e.g. 100"
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Min events in last hour</label>
-                <p className="text-xs text-muted-foreground mb-1">Only alert if issue received this many events in 1h (spike).</p>
-                <Input
-                  type="number"
-                  value={alertMinVelocity}
-                  onChange={e => setAlertMinVelocity(e.target.value)}
-                  placeholder="e.g. 10"
-                  className="mt-1"
-                />
-              </div>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowAlertForm(false)}>Cancel</Button>

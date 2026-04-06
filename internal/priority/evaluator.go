@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/google/uuid"
 )
@@ -70,51 +71,70 @@ func Evaluate(ctx context.Context, queries *db.Queries, projectID uuid.UUID, iss
 	// Build searchable text: title + full event data
 	searchText := issue.Title + "\n" + eventText
 
+	// Build shared eval context for the conditions engine
+	loader := &priorityLoader{queries: queries, ctx: ctx, cache: cache}
+	evalCtx := conditions.NewEvalContext(conditions.IssueData{
+		ID:         issue.ID,
+		Title:      issue.Title,
+		Level:      issue.Level,
+		Platform:   issue.Platform,
+		EventCount: issue.EventCount,
+	}, eventText, loader)
+
 	score := int32(50) // base score
 
 	for _, rule := range rules {
 		matched := false
 
-		switch rule.RuleType {
-		case "velocity_1h":
-			if velocity1h == nil {
-				v := getVelocity1h(ctx, queries, issue.ID)
-				velocity1h = &v
+		// New engine: if conditions JSONB is set, use it
+		if rule.Conditions.Valid {
+			var group conditions.Group
+			if err := json.Unmarshal(rule.Conditions.RawMessage, &group); err == nil {
+				matched = conditions.Evaluate(group, evalCtx)
 			}
-			matched = compareInt(*velocity1h, rule.Operator, rule.Threshold)
+		} else {
+			// Legacy path: flat columns
+			switch rule.RuleType {
+			case "velocity_1h":
+				if velocity1h == nil {
+					v := getVelocity1h(ctx, queries, issue.ID)
+					velocity1h = &v
+				}
+				matched = compareInt(*velocity1h, rule.Operator, rule.Threshold)
 
-		case "velocity_24h":
-			if velocity24h == nil {
-				v := getVelocity24h(ctx, queries, issue.ID)
-				velocity24h = &v
+			case "velocity_24h":
+				if velocity24h == nil {
+					v := getVelocity24h(ctx, queries, issue.ID)
+					velocity24h = &v
+				}
+				matched = compareInt(*velocity24h, rule.Operator, rule.Threshold)
+
+			case "total_events":
+				matched = compareInt(issue.EventCount, rule.Operator, rule.Threshold)
+
+			case "user_count":
+				if userCount == nil {
+					uc := getUserCount(ctx, queries, issue.ID)
+					userCount = &uc
+				}
+				matched = compareInt(*userCount, rule.Operator, rule.Threshold)
+
+			case "title_contains":
+				if rule.Pattern != "" {
+					matched = matchesPattern(rule.Pattern, searchText)
+				}
+
+			case "title_not_contains":
+				if rule.Pattern != "" {
+					matched = !matchesPattern(rule.Pattern, searchText)
+				}
+
+			case "level_is":
+				matched = strings.EqualFold(issue.Level, rule.Pattern)
+
+			case "platform_is":
+				matched = strings.EqualFold(issue.Platform, rule.Pattern)
 			}
-			matched = compareInt(*velocity24h, rule.Operator, rule.Threshold)
-
-		case "total_events":
-			matched = compareInt(issue.EventCount, rule.Operator, rule.Threshold)
-
-		case "user_count":
-			if userCount == nil {
-				uc := getUserCount(ctx, queries, issue.ID)
-				userCount = &uc
-			}
-			matched = compareInt(*userCount, rule.Operator, rule.Threshold)
-
-		case "title_contains":
-			if rule.Pattern != "" {
-				matched = matchesPattern(rule.Pattern, searchText)
-			}
-
-		case "title_not_contains":
-			if rule.Pattern != "" {
-				matched = !matchesPattern(rule.Pattern, searchText)
-			}
-
-		case "level_is":
-			matched = strings.EqualFold(issue.Level, rule.Pattern)
-
-		case "platform_is":
-			matched = strings.EqualFold(issue.Platform, rule.Pattern)
 		}
 
 		if matched {
@@ -223,4 +243,23 @@ func compareInt(value int32, operator string, threshold int32) bool {
 	default:
 		return value >= threshold
 	}
+}
+
+// priorityLoader implements conditions.DataLoader using cached velocity queries.
+type priorityLoader struct {
+	queries *db.Queries
+	ctx     context.Context
+	cache   *velocityCache
+}
+
+func (l *priorityLoader) GetVelocity1h(issueID uuid.UUID) (int32, error) {
+	return getVelocity1h(l.ctx, l.queries, issueID), nil
+}
+
+func (l *priorityLoader) GetVelocity24h(issueID uuid.UUID) (int32, error) {
+	return getVelocity24h(l.ctx, l.queries, issueID), nil
+}
+
+func (l *priorityLoader) GetUserCount(issueID uuid.UUID) (int32, error) {
+	return getUserCount(l.ctx, l.queries, issueID), nil
 }

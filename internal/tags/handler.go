@@ -7,6 +7,7 @@ import (
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 type Handler struct {
@@ -122,11 +123,19 @@ func (h *Handler) ListDistinctTags(w http.ResponseWriter, r *http.Request) {
 // --- Tag Rules ---
 
 type TagRuleRequest struct {
-	Name     string `json:"name"`
-	Pattern  string `json:"pattern"`
-	TagKey   string `json:"tag_key"`
-	TagValue string `json:"tag_value"`
-	Enabled  bool   `json:"enabled"`
+	Name       string          `json:"name"`
+	Pattern    string          `json:"pattern"`
+	TagKey     string          `json:"tag_key"`
+	TagValue   string          `json:"tag_value"`
+	Enabled    bool            `json:"enabled"`
+	Conditions json.RawMessage `json:"conditions,omitempty"`
+}
+
+func toNullJSON(raw json.RawMessage) pqtype.NullRawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return pqtype.NullRawMessage{}
+	}
+	return pqtype.NullRawMessage{RawMessage: raw, Valid: true}
 }
 
 func (h *Handler) ListRules(w http.ResponseWriter, r *http.Request) {
@@ -159,12 +168,13 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule, err := h.queries.CreateTagRule(r.Context(), db.CreateTagRuleParams{
-		ProjectID: projectID,
-		Name:      req.Name,
-		Pattern:   req.Pattern,
-		TagKey:    req.TagKey,
-		TagValue:  req.TagValue,
-		Enabled:   req.Enabled,
+		ProjectID:  projectID,
+		Name:       req.Name,
+		Pattern:    req.Pattern,
+		TagKey:     req.TagKey,
+		TagValue:   req.TagValue,
+		Enabled:    req.Enabled,
+		Conditions: toNullJSON(req.Conditions),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create rule")
@@ -190,13 +200,14 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule, err := h.queries.UpdateTagRule(r.Context(), db.UpdateTagRuleParams{
-		ID:        ruleID,
-		ProjectID: projectID,
-		Name:      req.Name,
-		Pattern:   req.Pattern,
-		TagKey:    req.TagKey,
-		TagValue:  req.TagValue,
-		Enabled:   req.Enabled,
+		ID:         ruleID,
+		ProjectID:  projectID,
+		Name:       req.Name,
+		Pattern:    req.Pattern,
+		TagKey:     req.TagKey,
+		TagValue:   req.TagValue,
+		Enabled:    req.Enabled,
+		Conditions: toNullJSON(req.Conditions),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update rule")

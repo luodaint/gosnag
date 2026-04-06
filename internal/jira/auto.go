@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log/slog"
 
+	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/google/uuid"
 )
@@ -38,8 +39,16 @@ func CheckAndCreateTicket(ctx context.Context, queries *db.Queries, baseURL stri
 		userCount = int32(uc)
 	}
 
+	evalCtx := conditions.NewEvalContext(conditions.IssueData{
+		ID:         issue.ID,
+		Title:      issue.Title,
+		Level:      issue.Level,
+		Platform:   issue.Platform,
+		EventCount: issue.EventCount,
+	}, "", &jiraLoader{queries: queries, ctx: ctx})
+
 	for _, rule := range rules {
-		if MatchesRule(rule, issue, userCount) {
+		if MatchesRule(rule, issue, userCount, evalCtx) {
 			// Re-check jira_ticket_key right before creating (race condition guard)
 			fresh, err := queries.GetIssue(ctx, issue.ID)
 			if err != nil || fresh.JiraTicketKey.Valid {
@@ -73,4 +82,22 @@ func CheckAndCreateTicket(ctx context.Context, queries *db.Queries, baseURL stri
 			return // Only create one ticket per issue
 		}
 	}
+}
+
+type jiraLoader struct {
+	queries *db.Queries
+	ctx     context.Context
+}
+
+func (l *jiraLoader) GetVelocity1h(issueID uuid.UUID) (int32, error) {
+	return l.queries.GetIssueVelocity1h(l.ctx, issueID)
+}
+
+func (l *jiraLoader) GetVelocity24h(issueID uuid.UUID) (int32, error) {
+	return l.queries.GetIssueVelocity24h(l.ctx, issueID)
+}
+
+func (l *jiraLoader) GetUserCount(issueID uuid.UUID) (int32, error) {
+	count, err := l.queries.GetIssueUserCount(l.ctx, issueID)
+	return int32(count), err
 }

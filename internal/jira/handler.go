@@ -10,6 +10,7 @@ import (
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 type Handler struct {
@@ -142,12 +143,20 @@ func (h *Handler) ListRules(w http.ResponseWriter, r *http.Request) {
 }
 
 type RuleRequest struct {
-	Name         string `json:"name"`
-	Enabled      bool   `json:"enabled"`
-	LevelFilter  string `json:"level_filter"`
-	MinEvents    int32  `json:"min_events"`
-	MinUsers     int32  `json:"min_users"`
-	TitlePattern string `json:"title_pattern"`
+	Name         string          `json:"name"`
+	Enabled      bool            `json:"enabled"`
+	LevelFilter  string          `json:"level_filter"`
+	MinEvents    int32           `json:"min_events"`
+	MinUsers     int32           `json:"min_users"`
+	TitlePattern string          `json:"title_pattern"`
+	Conditions   json.RawMessage `json:"conditions,omitempty"`
+}
+
+func toNullJSON(raw json.RawMessage) pqtype.NullRawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return pqtype.NullRawMessage{}
+	}
+	return pqtype.NullRawMessage{RawMessage: raw, Valid: true}
 }
 
 // CreateRule creates a new Jira auto-creation rule.
@@ -177,6 +186,7 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		MinEvents:    req.MinEvents,
 		MinUsers:     req.MinUsers,
 		TitlePattern: req.TitlePattern,
+		Conditions:   toNullJSON(req.Conditions),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create rule")
@@ -215,6 +225,7 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		MinEvents:    req.MinEvents,
 		MinUsers:     req.MinUsers,
 		TitlePattern: req.TitlePattern,
+		Conditions:   toNullJSON(req.Conditions),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update rule")

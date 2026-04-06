@@ -7,6 +7,7 @@ import (
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 type Handler struct {
@@ -18,13 +19,14 @@ func NewHandler(queries *db.Queries) *Handler {
 }
 
 type RuleRequest struct {
-	Name      string `json:"name"`
-	RuleType  string `json:"rule_type"`
-	Pattern   string `json:"pattern"`
-	Operator  string `json:"operator"`
-	Threshold int32  `json:"threshold"`
-	Points    int32  `json:"points"`
-	Enabled   bool   `json:"enabled"`
+	Name       string          `json:"name"`
+	RuleType   string          `json:"rule_type"`
+	Pattern    string          `json:"pattern"`
+	Operator   string          `json:"operator"`
+	Threshold  int32           `json:"threshold"`
+	Points     int32           `json:"points"`
+	Enabled    bool            `json:"enabled"`
+	Conditions json.RawMessage `json:"conditions,omitempty"`
 }
 
 func (h *Handler) ListRules(w http.ResponseWriter, r *http.Request) {
@@ -64,14 +66,15 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rule, err := h.queries.CreatePriorityRule(r.Context(), db.CreatePriorityRuleParams{
-		ProjectID: projectID,
-		Name:      req.Name,
-		RuleType:  req.RuleType,
-		Pattern:   req.Pattern,
-		Operator:  req.Operator,
-		Threshold: req.Threshold,
-		Points:    req.Points,
-		Enabled:   req.Enabled,
+		ProjectID:  projectID,
+		Name:       req.Name,
+		RuleType:   req.RuleType,
+		Pattern:    req.Pattern,
+		Operator:   req.Operator,
+		Threshold:  req.Threshold,
+		Points:     req.Points,
+		Enabled:    req.Enabled,
+		Conditions: toNullJSON(req.Conditions),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create rule")
@@ -99,15 +102,16 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rule, err := h.queries.UpdatePriorityRule(r.Context(), db.UpdatePriorityRuleParams{
-		ID:        ruleID,
-		ProjectID: projectID,
-		Name:      req.Name,
-		RuleType:  req.RuleType,
-		Pattern:   req.Pattern,
-		Operator:  req.Operator,
-		Threshold: req.Threshold,
-		Points:    req.Points,
-		Enabled:   req.Enabled,
+		ID:         ruleID,
+		ProjectID:  projectID,
+		Name:       req.Name,
+		RuleType:   req.RuleType,
+		Pattern:    req.Pattern,
+		Operator:   req.Operator,
+		Threshold:  req.Threshold,
+		Points:     req.Points,
+		Enabled:    req.Enabled,
+		Conditions: toNullJSON(req.Conditions),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update rule")
@@ -153,6 +157,13 @@ func (h *Handler) RecalcAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"recalculated": count})
+}
+
+func toNullJSON(raw json.RawMessage) pqtype.NullRawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return pqtype.NullRawMessage{}
+	}
+	return pqtype.NullRawMessage{RawMessage: raw, Valid: true}
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

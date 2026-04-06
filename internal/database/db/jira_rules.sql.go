@@ -10,22 +10,24 @@ import (
 	"database/sql"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const createJiraRule = `-- name: CreateJiraRule :one
-INSERT INTO jira_rules (project_id, name, enabled, level_filter, min_events, min_users, title_pattern)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at
+INSERT INTO jira_rules (project_id, name, enabled, level_filter, min_events, min_users, title_pattern, conditions)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at, conditions
 `
 
 type CreateJiraRuleParams struct {
-	ProjectID    uuid.UUID `json:"project_id"`
-	Name         string    `json:"name"`
-	Enabled      bool      `json:"enabled"`
-	LevelFilter  string    `json:"level_filter"`
-	MinEvents    int32     `json:"min_events"`
-	MinUsers     int32     `json:"min_users"`
-	TitlePattern string    `json:"title_pattern"`
+	ProjectID    uuid.UUID             `json:"project_id"`
+	Name         string                `json:"name"`
+	Enabled      bool                  `json:"enabled"`
+	LevelFilter  string                `json:"level_filter"`
+	MinEvents    int32                 `json:"min_events"`
+	MinUsers     int32                 `json:"min_users"`
+	TitlePattern string                `json:"title_pattern"`
+	Conditions   pqtype.NullRawMessage `json:"conditions"`
 }
 
 func (q *Queries) CreateJiraRule(ctx context.Context, arg CreateJiraRuleParams) (JiraRule, error) {
@@ -37,6 +39,7 @@ func (q *Queries) CreateJiraRule(ctx context.Context, arg CreateJiraRuleParams) 
 		arg.MinEvents,
 		arg.MinUsers,
 		arg.TitlePattern,
+		arg.Conditions,
 	)
 	var i JiraRule
 	err := row.Scan(
@@ -50,6 +53,7 @@ func (q *Queries) CreateJiraRule(ctx context.Context, arg CreateJiraRuleParams) 
 		&i.TitlePattern,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Conditions,
 	)
 	return i, err
 }
@@ -69,7 +73,7 @@ func (q *Queries) DeleteJiraRule(ctx context.Context, arg DeleteJiraRuleParams) 
 }
 
 const getJiraRule = `-- name: GetJiraRule :one
-SELECT id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at FROM jira_rules WHERE id = $1
+SELECT id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at, conditions FROM jira_rules WHERE id = $1
 `
 
 func (q *Queries) GetJiraRule(ctx context.Context, id uuid.UUID) (JiraRule, error) {
@@ -86,12 +90,13 @@ func (q *Queries) GetJiraRule(ctx context.Context, id uuid.UUID) (JiraRule, erro
 		&i.TitlePattern,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Conditions,
 	)
 	return i, err
 }
 
 const listEnabledJiraRules = `-- name: ListEnabledJiraRules :many
-SELECT id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at FROM jira_rules WHERE project_id = $1 AND enabled = true
+SELECT id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at, conditions FROM jira_rules WHERE project_id = $1 AND enabled = true
 `
 
 func (q *Queries) ListEnabledJiraRules(ctx context.Context, projectID uuid.UUID) ([]JiraRule, error) {
@@ -114,6 +119,7 @@ func (q *Queries) ListEnabledJiraRules(ctx context.Context, projectID uuid.UUID)
 			&i.TitlePattern,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Conditions,
 		); err != nil {
 			return nil, err
 		}
@@ -129,7 +135,7 @@ func (q *Queries) ListEnabledJiraRules(ctx context.Context, projectID uuid.UUID)
 }
 
 const listJiraRules = `-- name: ListJiraRules :many
-SELECT id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at FROM jira_rules WHERE project_id = $1 ORDER BY created_at
+SELECT id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at, conditions FROM jira_rules WHERE project_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ListJiraRules(ctx context.Context, projectID uuid.UUID) ([]JiraRule, error) {
@@ -152,6 +158,7 @@ func (q *Queries) ListJiraRules(ctx context.Context, projectID uuid.UUID) ([]Jir
 			&i.TitlePattern,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Conditions,
 		); err != nil {
 			return nil, err
 		}
@@ -183,20 +190,21 @@ func (q *Queries) UpdateIssueJiraTicket(ctx context.Context, arg UpdateIssueJira
 
 const updateJiraRule = `-- name: UpdateJiraRule :one
 UPDATE jira_rules
-SET name = $3, enabled = $4, level_filter = $5, min_events = $6, min_users = $7, title_pattern = $8, updated_at = now()
+SET name = $3, enabled = $4, level_filter = $5, min_events = $6, min_users = $7, title_pattern = $8, conditions = $9, updated_at = now()
 WHERE id = $1 AND project_id = $2
-RETURNING id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at
+RETURNING id, project_id, name, enabled, level_filter, min_events, min_users, title_pattern, created_at, updated_at, conditions
 `
 
 type UpdateJiraRuleParams struct {
-	ID           uuid.UUID `json:"id"`
-	ProjectID    uuid.UUID `json:"project_id"`
-	Name         string    `json:"name"`
-	Enabled      bool      `json:"enabled"`
-	LevelFilter  string    `json:"level_filter"`
-	MinEvents    int32     `json:"min_events"`
-	MinUsers     int32     `json:"min_users"`
-	TitlePattern string    `json:"title_pattern"`
+	ID           uuid.UUID             `json:"id"`
+	ProjectID    uuid.UUID             `json:"project_id"`
+	Name         string                `json:"name"`
+	Enabled      bool                  `json:"enabled"`
+	LevelFilter  string                `json:"level_filter"`
+	MinEvents    int32                 `json:"min_events"`
+	MinUsers     int32                 `json:"min_users"`
+	TitlePattern string                `json:"title_pattern"`
+	Conditions   pqtype.NullRawMessage `json:"conditions"`
 }
 
 func (q *Queries) UpdateJiraRule(ctx context.Context, arg UpdateJiraRuleParams) (JiraRule, error) {
@@ -209,6 +217,7 @@ func (q *Queries) UpdateJiraRule(ctx context.Context, arg UpdateJiraRuleParams) 
 		arg.MinEvents,
 		arg.MinUsers,
 		arg.TitlePattern,
+		arg.Conditions,
 	)
 	var i JiraRule
 	err := row.Scan(
@@ -222,6 +231,7 @@ func (q *Queries) UpdateJiraRule(ctx context.Context, arg UpdateJiraRuleParams) 
 		&i.TitlePattern,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Conditions,
 	)
 	return i, err
 }

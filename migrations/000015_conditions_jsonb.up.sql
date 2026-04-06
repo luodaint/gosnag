@@ -1,0 +1,4 @@
+ALTER TABLE alert_configs ADD COLUMN IF NOT EXISTS conditions JSONB;
+ALTER TABLE priority_rules ADD COLUMN IF NOT EXISTS conditions JSONB;
+ALTER TABLE tag_rules ADD COLUMN IF NOT EXISTS conditions JSONB;
+ALTER TABLE jira_rules ADD COLUMN IF NOT EXISTS conditions JSONB;

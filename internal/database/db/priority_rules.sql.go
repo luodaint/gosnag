@@ -9,23 +9,25 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const createPriorityRule = `-- name: CreatePriorityRule :one
-INSERT INTO priority_rules (project_id, name, rule_type, pattern, operator, threshold, points, enabled, position)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE((SELECT max(position) + 1 FROM priority_rules WHERE project_id = $1), 0))
-RETURNING id, project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, created_at, updated_at
+INSERT INTO priority_rules (project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, conditions)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE((SELECT max(position) + 1 FROM priority_rules WHERE project_id = $1), 0), $9)
+RETURNING id, project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, created_at, updated_at, conditions
 `
 
 type CreatePriorityRuleParams struct {
-	ProjectID uuid.UUID `json:"project_id"`
-	Name      string    `json:"name"`
-	RuleType  string    `json:"rule_type"`
-	Pattern   string    `json:"pattern"`
-	Operator  string    `json:"operator"`
-	Threshold int32     `json:"threshold"`
-	Points    int32     `json:"points"`
-	Enabled   bool      `json:"enabled"`
+	ProjectID  uuid.UUID             `json:"project_id"`
+	Name       string                `json:"name"`
+	RuleType   string                `json:"rule_type"`
+	Pattern    string                `json:"pattern"`
+	Operator   string                `json:"operator"`
+	Threshold  int32                 `json:"threshold"`
+	Points     int32                 `json:"points"`
+	Enabled    bool                  `json:"enabled"`
+	Conditions pqtype.NullRawMessage `json:"conditions"`
 }
 
 func (q *Queries) CreatePriorityRule(ctx context.Context, arg CreatePriorityRuleParams) (PriorityRule, error) {
@@ -38,6 +40,7 @@ func (q *Queries) CreatePriorityRule(ctx context.Context, arg CreatePriorityRule
 		arg.Threshold,
 		arg.Points,
 		arg.Enabled,
+		arg.Conditions,
 	)
 	var i PriorityRule
 	err := row.Scan(
@@ -53,6 +56,7 @@ func (q *Queries) CreatePriorityRule(ctx context.Context, arg CreatePriorityRule
 		&i.Position,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Conditions,
 	)
 	return i, err
 }
@@ -96,7 +100,7 @@ func (q *Queries) GetIssueVelocity24h(ctx context.Context, issueID uuid.UUID) (i
 }
 
 const listEnabledPriorityRules = `-- name: ListEnabledPriorityRules :many
-SELECT id, project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, created_at, updated_at FROM priority_rules WHERE project_id = $1 AND enabled = true ORDER BY position
+SELECT id, project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, created_at, updated_at, conditions FROM priority_rules WHERE project_id = $1 AND enabled = true ORDER BY position
 `
 
 func (q *Queries) ListEnabledPriorityRules(ctx context.Context, projectID uuid.UUID) ([]PriorityRule, error) {
@@ -121,6 +125,7 @@ func (q *Queries) ListEnabledPriorityRules(ctx context.Context, projectID uuid.U
 			&i.Position,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Conditions,
 		); err != nil {
 			return nil, err
 		}
@@ -163,7 +168,7 @@ func (q *Queries) ListIssueIDsByProject(ctx context.Context, projectID uuid.UUID
 }
 
 const listPriorityRules = `-- name: ListPriorityRules :many
-SELECT id, project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, created_at, updated_at FROM priority_rules WHERE project_id = $1 ORDER BY position, created_at
+SELECT id, project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, created_at, updated_at, conditions FROM priority_rules WHERE project_id = $1 ORDER BY position, created_at
 `
 
 func (q *Queries) ListPriorityRules(ctx context.Context, projectID uuid.UUID) ([]PriorityRule, error) {
@@ -188,6 +193,7 @@ func (q *Queries) ListPriorityRules(ctx context.Context, projectID uuid.UUID) ([
 			&i.Position,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Conditions,
 		); err != nil {
 			return nil, err
 		}
@@ -218,21 +224,22 @@ func (q *Queries) UpdateIssuePriority(ctx context.Context, arg UpdateIssuePriori
 
 const updatePriorityRule = `-- name: UpdatePriorityRule :one
 UPDATE priority_rules
-SET name = $3, rule_type = $4, pattern = $5, operator = $6, threshold = $7, points = $8, enabled = $9, updated_at = now()
+SET name = $3, rule_type = $4, pattern = $5, operator = $6, threshold = $7, points = $8, enabled = $9, conditions = $10, updated_at = now()
 WHERE id = $1 AND project_id = $2
-RETURNING id, project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, created_at, updated_at
+RETURNING id, project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, created_at, updated_at, conditions
 `
 
 type UpdatePriorityRuleParams struct {
-	ID        uuid.UUID `json:"id"`
-	ProjectID uuid.UUID `json:"project_id"`
-	Name      string    `json:"name"`
-	RuleType  string    `json:"rule_type"`
-	Pattern   string    `json:"pattern"`
-	Operator  string    `json:"operator"`
-	Threshold int32     `json:"threshold"`
-	Points    int32     `json:"points"`
-	Enabled   bool      `json:"enabled"`
+	ID         uuid.UUID             `json:"id"`
+	ProjectID  uuid.UUID             `json:"project_id"`
+	Name       string                `json:"name"`
+	RuleType   string                `json:"rule_type"`
+	Pattern    string                `json:"pattern"`
+	Operator   string                `json:"operator"`
+	Threshold  int32                 `json:"threshold"`
+	Points     int32                 `json:"points"`
+	Enabled    bool                  `json:"enabled"`
+	Conditions pqtype.NullRawMessage `json:"conditions"`
 }
 
 func (q *Queries) UpdatePriorityRule(ctx context.Context, arg UpdatePriorityRuleParams) (PriorityRule, error) {
@@ -246,6 +253,7 @@ func (q *Queries) UpdatePriorityRule(ctx context.Context, arg UpdatePriorityRule
 		arg.Threshold,
 		arg.Points,
 		arg.Enabled,
+		arg.Conditions,
 	)
 	var i PriorityRule
 	err := row.Scan(
@@ -261,6 +269,7 @@ func (q *Queries) UpdatePriorityRule(ctx context.Context, arg UpdatePriorityRule
 		&i.Position,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Conditions,
 	)
 	return i, err
 }

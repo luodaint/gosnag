@@ -1,15 +1,25 @@
 package jira
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 
+	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/database/db"
 )
 
 // MatchesRule checks whether an issue satisfies all conditions of a Jira rule.
-func MatchesRule(rule db.JiraRule, issue db.Issue, userCount int32) bool {
-	// Level filter (comma-separated list)
+func MatchesRule(rule db.JiraRule, issue db.Issue, userCount int32, evalCtx *conditions.EvalContext) bool {
+	// New engine: if conditions JSONB is set, use it
+	if rule.Conditions.Valid {
+		var group conditions.Group
+		if err := json.Unmarshal(rule.Conditions.RawMessage, &group); err == nil {
+			return conditions.Evaluate(group, evalCtx)
+		}
+	}
+
+	// Legacy path: flat columns
 	if rule.LevelFilter != "" {
 		levels := strings.Split(rule.LevelFilter, ",")
 		matched := false
@@ -24,21 +34,17 @@ func MatchesRule(rule db.JiraRule, issue db.Issue, userCount int32) bool {
 		}
 	}
 
-	// Minimum events
 	if rule.MinEvents > 0 && issue.EventCount < rule.MinEvents {
 		return false
 	}
 
-	// Minimum users
 	if rule.MinUsers > 0 && userCount < rule.MinUsers {
 		return false
 	}
 
-	// Title pattern (plain text = contains, regex if starts/ends with special chars)
 	if rule.TitlePattern != "" {
 		re, err := regexp.Compile(rule.TitlePattern)
 		if err != nil {
-			// Fall back to contains match
 			if !strings.Contains(strings.ToLower(issue.Title), strings.ToLower(rule.TitlePattern)) {
 				return false
 			}

@@ -25,13 +25,13 @@ SELECT * FROM tag_rules WHERE project_id = $1 ORDER BY created_at;
 SELECT * FROM tag_rules WHERE project_id = $1 AND enabled = true;
 
 -- name: CreateTagRule :one
-INSERT INTO tag_rules (project_id, name, pattern, tag_key, tag_value, enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO tag_rules (project_id, name, pattern, tag_key, tag_value, enabled, conditions)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: UpdateTagRule :one
 UPDATE tag_rules
-SET name = $3, pattern = $4, tag_key = $5, tag_value = $6, enabled = $7, updated_at = now()
+SET name = $3, pattern = $4, tag_key = $5, tag_value = $6, enabled = $7, conditions = $8, updated_at = now()
 WHERE id = $1 AND project_id = $2
 RETURNING *;
 

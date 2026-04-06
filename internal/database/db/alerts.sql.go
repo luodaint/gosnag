@@ -10,24 +10,26 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 const createAlertConfig = `-- name: CreateAlertConfig :one
-INSERT INTO alert_configs (project_id, alert_type, config, enabled, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, project_id, alert_type, config, enabled, created_at, updated_at, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern
+INSERT INTO alert_configs (project_id, alert_type, config, enabled, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern, conditions)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, project_id, alert_type, config, enabled, created_at, updated_at, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern, conditions
 `
 
 type CreateAlertConfigParams struct {
-	ProjectID      uuid.UUID       `json:"project_id"`
-	AlertType      string          `json:"alert_type"`
-	Config         json.RawMessage `json:"config"`
-	Enabled        bool            `json:"enabled"`
-	LevelFilter    string          `json:"level_filter"`
-	TitlePattern   string          `json:"title_pattern"`
-	MinEvents      int32           `json:"min_events"`
-	MinVelocity1h  int32           `json:"min_velocity_1h"`
-	ExcludePattern string          `json:"exclude_pattern"`
+	ProjectID      uuid.UUID             `json:"project_id"`
+	AlertType      string                `json:"alert_type"`
+	Config         json.RawMessage       `json:"config"`
+	Enabled        bool                  `json:"enabled"`
+	LevelFilter    string                `json:"level_filter"`
+	TitlePattern   string                `json:"title_pattern"`
+	MinEvents      int32                 `json:"min_events"`
+	MinVelocity1h  int32                 `json:"min_velocity_1h"`
+	ExcludePattern string                `json:"exclude_pattern"`
+	Conditions     pqtype.NullRawMessage `json:"conditions"`
 }
 
 func (q *Queries) CreateAlertConfig(ctx context.Context, arg CreateAlertConfigParams) (AlertConfig, error) {
@@ -41,6 +43,7 @@ func (q *Queries) CreateAlertConfig(ctx context.Context, arg CreateAlertConfigPa
 		arg.MinEvents,
 		arg.MinVelocity1h,
 		arg.ExcludePattern,
+		arg.Conditions,
 	)
 	var i AlertConfig
 	err := row.Scan(
@@ -56,6 +59,7 @@ func (q *Queries) CreateAlertConfig(ctx context.Context, arg CreateAlertConfigPa
 		&i.MinEvents,
 		&i.MinVelocity1h,
 		&i.ExcludePattern,
+		&i.Conditions,
 	)
 	return i, err
 }
@@ -75,7 +79,7 @@ func (q *Queries) DeleteAlertConfig(ctx context.Context, arg DeleteAlertConfigPa
 }
 
 const getEnabledAlerts = `-- name: GetEnabledAlerts :many
-SELECT id, project_id, alert_type, config, enabled, created_at, updated_at, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern FROM alert_configs WHERE project_id = $1 AND enabled = true
+SELECT id, project_id, alert_type, config, enabled, created_at, updated_at, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern, conditions FROM alert_configs WHERE project_id = $1 AND enabled = true
 `
 
 func (q *Queries) GetEnabledAlerts(ctx context.Context, projectID uuid.UUID) ([]AlertConfig, error) {
@@ -100,6 +104,7 @@ func (q *Queries) GetEnabledAlerts(ctx context.Context, projectID uuid.UUID) ([]
 			&i.MinEvents,
 			&i.MinVelocity1h,
 			&i.ExcludePattern,
+			&i.Conditions,
 		); err != nil {
 			return nil, err
 		}
@@ -115,7 +120,7 @@ func (q *Queries) GetEnabledAlerts(ctx context.Context, projectID uuid.UUID) ([]
 }
 
 const listAlertConfigs = `-- name: ListAlertConfigs :many
-SELECT id, project_id, alert_type, config, enabled, created_at, updated_at, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern FROM alert_configs WHERE project_id = $1 ORDER BY created_at
+SELECT id, project_id, alert_type, config, enabled, created_at, updated_at, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern, conditions FROM alert_configs WHERE project_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ListAlertConfigs(ctx context.Context, projectID uuid.UUID) ([]AlertConfig, error) {
@@ -140,6 +145,7 @@ func (q *Queries) ListAlertConfigs(ctx context.Context, projectID uuid.UUID) ([]
 			&i.MinEvents,
 			&i.MinVelocity1h,
 			&i.ExcludePattern,
+			&i.Conditions,
 		); err != nil {
 			return nil, err
 		}
@@ -156,21 +162,22 @@ func (q *Queries) ListAlertConfigs(ctx context.Context, projectID uuid.UUID) ([]
 
 const updateAlertConfig = `-- name: UpdateAlertConfig :one
 UPDATE alert_configs
-SET config = $3, enabled = $4, level_filter = $5, title_pattern = $6, min_events = $7, min_velocity_1h = $8, exclude_pattern = $9, updated_at = now()
+SET config = $3, enabled = $4, level_filter = $5, title_pattern = $6, min_events = $7, min_velocity_1h = $8, exclude_pattern = $9, conditions = $10, updated_at = now()
 WHERE id = $1 AND project_id = $2
-RETURNING id, project_id, alert_type, config, enabled, created_at, updated_at, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern
+RETURNING id, project_id, alert_type, config, enabled, created_at, updated_at, level_filter, title_pattern, min_events, min_velocity_1h, exclude_pattern, conditions
 `
 
 type UpdateAlertConfigParams struct {
-	ID             uuid.UUID       `json:"id"`
-	ProjectID      uuid.UUID       `json:"project_id"`
-	Config         json.RawMessage `json:"config"`
-	Enabled        bool            `json:"enabled"`
-	LevelFilter    string          `json:"level_filter"`
-	TitlePattern   string          `json:"title_pattern"`
-	MinEvents      int32           `json:"min_events"`
-	MinVelocity1h  int32           `json:"min_velocity_1h"`
-	ExcludePattern string          `json:"exclude_pattern"`
+	ID             uuid.UUID             `json:"id"`
+	ProjectID      uuid.UUID             `json:"project_id"`
+	Config         json.RawMessage       `json:"config"`
+	Enabled        bool                  `json:"enabled"`
+	LevelFilter    string                `json:"level_filter"`
+	TitlePattern   string                `json:"title_pattern"`
+	MinEvents      int32                 `json:"min_events"`
+	MinVelocity1h  int32                 `json:"min_velocity_1h"`
+	ExcludePattern string                `json:"exclude_pattern"`
+	Conditions     pqtype.NullRawMessage `json:"conditions"`
 }
 
 func (q *Queries) UpdateAlertConfig(ctx context.Context, arg UpdateAlertConfigParams) (AlertConfig, error) {
@@ -184,6 +191,7 @@ func (q *Queries) UpdateAlertConfig(ctx context.Context, arg UpdateAlertConfigPa
 		arg.MinEvents,
 		arg.MinVelocity1h,
 		arg.ExcludePattern,
+		arg.Conditions,
 	)
 	var i AlertConfig
 	err := row.Scan(
@@ -199,6 +207,7 @@ func (q *Queries) UpdateAlertConfig(ctx context.Context, arg UpdateAlertConfigPa
 		&i.MinEvents,
 		&i.MinVelocity1h,
 		&i.ExcludePattern,
+		&i.Conditions,
 	)
 	return i, err
 }

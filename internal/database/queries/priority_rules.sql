@@ -5,13 +5,13 @@ SELECT * FROM priority_rules WHERE project_id = $1 ORDER BY position, created_at
 SELECT * FROM priority_rules WHERE project_id = $1 AND enabled = true ORDER BY position;
 
 -- name: CreatePriorityRule :one
-INSERT INTO priority_rules (project_id, name, rule_type, pattern, operator, threshold, points, enabled, position)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE((SELECT max(position) + 1 FROM priority_rules WHERE project_id = $1), 0))
+INSERT INTO priority_rules (project_id, name, rule_type, pattern, operator, threshold, points, enabled, position, conditions)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE((SELECT max(position) + 1 FROM priority_rules WHERE project_id = $1), 0), $9)
 RETURNING *;
 
 -- name: UpdatePriorityRule :one
 UPDATE priority_rules
-SET name = $3, rule_type = $4, pattern = $5, operator = $6, threshold = $7, points = $8, enabled = $9, updated_at = now()
+SET name = $3, rule_type = $4, pattern = $5, operator = $6, threshold = $7, points = $8, enabled = $9, conditions = $10, updated_at = now()
 WHERE id = $1 AND project_id = $2
 RETURNING *;
 

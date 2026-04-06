@@ -10,21 +10,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
 type AlertConfig struct {
-	ID             uuid.UUID       `json:"id"`
-	ProjectID      uuid.UUID       `json:"project_id"`
-	AlertType      string          `json:"alert_type"`
-	Config         json.RawMessage `json:"config"`
-	Enabled        bool            `json:"enabled"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
-	LevelFilter    string          `json:"level_filter"`
-	TitlePattern   string          `json:"title_pattern"`
-	MinEvents      int32           `json:"min_events"`
-	MinVelocity1h  int32           `json:"min_velocity_1h"`
-	ExcludePattern string          `json:"exclude_pattern"`
+	ID             uuid.UUID             `json:"id"`
+	ProjectID      uuid.UUID             `json:"project_id"`
+	AlertType      string                `json:"alert_type"`
+	Config         json.RawMessage       `json:"config"`
+	Enabled        bool                  `json:"enabled"`
+	CreatedAt      time.Time             `json:"created_at"`
+	UpdatedAt      time.Time             `json:"updated_at"`
+	LevelFilter    string                `json:"level_filter"`
+	TitlePattern   string                `json:"title_pattern"`
+	MinEvents      int32                 `json:"min_events"`
+	MinVelocity1h  int32                 `json:"min_velocity_1h"`
+	ExcludePattern string                `json:"exclude_pattern"`
+	Conditions     pqtype.NullRawMessage `json:"conditions"`
 }
 
 type ApiToken struct {
@@ -98,31 +100,33 @@ type IssueTag struct {
 }
 
 type JiraRule struct {
-	ID           uuid.UUID `json:"id"`
-	ProjectID    uuid.UUID `json:"project_id"`
-	Name         string    `json:"name"`
-	Enabled      bool      `json:"enabled"`
-	LevelFilter  string    `json:"level_filter"`
-	MinEvents    int32     `json:"min_events"`
-	MinUsers     int32     `json:"min_users"`
-	TitlePattern string    `json:"title_pattern"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           uuid.UUID             `json:"id"`
+	ProjectID    uuid.UUID             `json:"project_id"`
+	Name         string                `json:"name"`
+	Enabled      bool                  `json:"enabled"`
+	LevelFilter  string                `json:"level_filter"`
+	MinEvents    int32                 `json:"min_events"`
+	MinUsers     int32                 `json:"min_users"`
+	TitlePattern string                `json:"title_pattern"`
+	CreatedAt    time.Time             `json:"created_at"`
+	UpdatedAt    time.Time             `json:"updated_at"`
+	Conditions   pqtype.NullRawMessage `json:"conditions"`
 }
 
 type PriorityRule struct {
-	ID        uuid.UUID `json:"id"`
-	ProjectID uuid.UUID `json:"project_id"`
-	Name      string    `json:"name"`
-	RuleType  string    `json:"rule_type"`
-	Pattern   string    `json:"pattern"`
-	Operator  string    `json:"operator"`
-	Threshold int32     `json:"threshold"`
-	Points    int32     `json:"points"`
-	Enabled   bool      `json:"enabled"`
-	Position  int32     `json:"position"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         uuid.UUID             `json:"id"`
+	ProjectID  uuid.UUID             `json:"project_id"`
+	Name       string                `json:"name"`
+	RuleType   string                `json:"rule_type"`
+	Pattern    string                `json:"pattern"`
+	Operator   string                `json:"operator"`
+	Threshold  int32                 `json:"threshold"`
+	Points     int32                 `json:"points"`
+	Enabled    bool                  `json:"enabled"`
+	Position   int32                 `json:"position"`
+	CreatedAt  time.Time             `json:"created_at"`
+	UpdatedAt  time.Time             `json:"updated_at"`
+	Conditions pqtype.NullRawMessage `json:"conditions"`
 }
 
 type Project struct {
@@ -171,15 +175,16 @@ type Session struct {
 }
 
 type TagRule struct {
-	ID        uuid.UUID `json:"id"`
-	ProjectID uuid.UUID `json:"project_id"`
-	Name      string    `json:"name"`
-	Pattern   string    `json:"pattern"`
-	TagKey    string    `json:"tag_key"`
-	TagValue  string    `json:"tag_value"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         uuid.UUID             `json:"id"`
+	ProjectID  uuid.UUID             `json:"project_id"`
+	Name       string                `json:"name"`
+	Pattern    string                `json:"pattern"`
+	TagKey     string                `json:"tag_key"`
+	TagValue   string                `json:"tag_value"`
+	Enabled    bool                  `json:"enabled"`
+	CreatedAt  time.Time             `json:"created_at"`
+	UpdatedAt  time.Time             `json:"updated_at"`
+	Conditions pqtype.NullRawMessage `json:"conditions"`
 }
 
 type User struct {
