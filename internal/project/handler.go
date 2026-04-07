@@ -272,6 +272,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Preserve existing values when not provided
+	name := req.Name
+	if name == "" {
+		name = existing.Name
+	}
+	slug := req.Slug
+	if slug == "" {
+		slug = existing.Slug
+	}
+
 	cooldown := existing.DefaultCooldownMinutes
 	if req.DefaultCooldownMinutes != nil {
 		cooldown = *req.DefaultCooldownMinutes
@@ -282,6 +292,18 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		warningAsError = *req.WarningAsError
 	}
 
+	jiraBaseURL := req.JiraBaseURL
+	if jiraBaseURL == "" {
+		jiraBaseURL = existing.JiraBaseUrl
+	}
+	jiraEmail := req.JiraEmail
+	if jiraEmail == "" {
+		jiraEmail = existing.JiraEmail
+	}
+	jiraProjectKey := req.JiraProjectKey
+	if jiraProjectKey == "" {
+		jiraProjectKey = existing.JiraProjectKey
+	}
 	jiraIssueType := req.JiraIssueType
 	if jiraIssueType == "" {
 		jiraIssueType = existing.JiraIssueType
@@ -289,8 +311,6 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if jiraIssueType == "" {
 		jiraIssueType = "Bug"
 	}
-
-	// Preserve existing Jira API token if not provided
 	jiraApiToken := req.JiraAPIToken
 	if jiraApiToken == "" {
 		jiraApiToken = existing.JiraApiToken
@@ -298,14 +318,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	project, err := h.queries.UpdateProject(r.Context(), db.UpdateProjectParams{
 		ID:                     id,
-		Name:                   req.Name,
-		Slug:                   req.Slug,
+		Name:                   name,
+		Slug:                   slug,
 		DefaultCooldownMinutes: cooldown,
 		WarningAsError:         warningAsError,
-		JiraBaseUrl:            req.JiraBaseURL,
-		JiraEmail:              req.JiraEmail,
+		JiraBaseUrl:            jiraBaseURL,
+		JiraEmail:              jiraEmail,
 		JiraApiToken:           jiraApiToken,
-		JiraProjectKey:         req.JiraProjectKey,
+		JiraProjectKey:         jiraProjectKey,
 		JiraIssueType:          jiraIssueType,
 	})
 	if err != nil {
