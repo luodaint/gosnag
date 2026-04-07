@@ -768,6 +768,11 @@ function formatEventSummary(data: Record<string, unknown>): string {
     lines.push(`Error: ${data.message}`)
   }
 
+  // Server
+  if (data.server_name) {
+    lines.push(`Server: ${data.server_name}`)
+  }
+
   // Request: URL + body
   const req = data.request as { method?: string; url?: string; data?: unknown; query_string?: string } | undefined
   if (req) {
