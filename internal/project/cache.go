@@ -2,81 +2,125 @@ package project
 
 import (
 	"context"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/google/uuid"
 )
 
-// StatsCache caches the project list with stats. Invalidated on event ingestion.
+// StatsCache caches the project list with stats using stale-while-revalidate.
+// Get always returns instantly from cache. When dirty and minRefresh has elapsed,
+// a single background goroutine rebuilds the cache with parallel queries.
 type StatsCache struct {
-	mu      sync.RWMutex
-	data    []ProjectListItem
-	valid   bool
-	buildAt time.Time
-	maxAge  time.Duration
-	queries *db.Queries
+	mu         sync.RWMutex
+	data       []ProjectListItem
+	hasData    bool
+	buildAt    time.Time
+	dirty      atomic.Bool
+	rebuilding atomic.Bool
+	minRefresh time.Duration
+	queries    *db.Queries
 }
 
-func NewStatsCache(queries *db.Queries, maxAge time.Duration) *StatsCache {
+func NewStatsCache(queries *db.Queries, minRefresh time.Duration) *StatsCache {
 	return &StatsCache{
-		queries: queries,
-		maxAge:  maxAge,
+		queries:    queries,
+		minRefresh: minRefresh,
 	}
 }
 
-// Invalidate marks the cache as stale. Next Get will recompute.
+// Invalidate marks the cache as dirty. Next Get will trigger an async rebuild
+// if minRefresh has elapsed, while still serving stale data instantly.
 func (c *StatsCache) Invalidate() {
-	c.mu.Lock()
-	c.valid = false
-	c.mu.Unlock()
+	c.dirty.Store(true)
 }
 
-// Get returns the cached project list, recomputing if stale or expired.
+// Get returns the cached project list. First call builds synchronously.
+// Subsequent calls always return cached data immediately; if dirty and
+// minRefresh has elapsed, an async rebuild is triggered in the background.
 func (c *StatsCache) Get(ctx context.Context) ([]ProjectListItem, error) {
 	c.mu.RLock()
-	if c.valid && time.Since(c.buildAt) < c.maxAge {
-		data := c.data
-		c.mu.RUnlock()
-		return data, nil
-	}
+	hasData := c.hasData
+	data := c.data
+	buildAt := c.buildAt
 	c.mu.RUnlock()
 
-	return c.rebuild(ctx)
-}
-
-func (c *StatsCache) rebuild(ctx context.Context) ([]ProjectListItem, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Double-check: another goroutine may have rebuilt while we waited for the lock
-	if c.valid && time.Since(c.buildAt) < c.maxAge {
-		return c.data, nil
+	if !hasData {
+		return c.buildSync(ctx)
 	}
 
-	projects, err := c.queries.ListProjects(ctx)
+	// Stale-while-revalidate: serve cached, rebuild in background if needed
+	if c.dirty.Load() && time.Since(buildAt) >= c.minRefresh {
+		if c.rebuilding.CompareAndSwap(false, true) {
+			go func() {
+				defer c.rebuilding.Store(false)
+				bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := c.buildAsync(bgCtx); err != nil {
+					slog.Error("stats cache rebuild failed", "error", err)
+				}
+			}()
+		}
+	}
+
+	return data, nil
+}
+
+func (c *StatsCache) buildSync(ctx context.Context) ([]ProjectListItem, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hasData {
+		return c.data, nil
+	}
+	result, err := buildResult(ctx, c.queries)
+	if err != nil {
+		return nil, err
+	}
+	c.data = result
+	c.hasData = true
+	c.buildAt = time.Now()
+	c.dirty.Store(false)
+	return result, nil
+}
+
+func (c *StatsCache) buildAsync(ctx context.Context) error {
+	result, err := buildResult(ctx, c.queries)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.data = result
+	c.hasData = true
+	c.buildAt = time.Now()
+	c.dirty.Store(false)
+	c.mu.Unlock()
+	return nil
+}
+
+func buildResult(ctx context.Context, queries *db.Queries) ([]ProjectListItem, error) {
+	projects, err := queries.ListProjects(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Run the 4 expensive queries in parallel
 	var (
-		wg         sync.WaitGroup
-		stats      []db.GetProjectStatsRow
-		trendRows  []db.GetProjectEventTrendRow
+		wg          sync.WaitGroup
+		stats       []db.GetProjectStatsRow
+		trendRows   []db.GetProjectEventTrendRow
 		releaseRows []db.GetProjectLatestReleaseRow
-		weeklyRows []db.GetProjectWeeklyErrorsRow
+		weeklyRows  []db.GetProjectWeeklyErrorsRow
 	)
 
 	wg.Add(4)
-	go func() { defer wg.Done(); stats, _ = c.queries.GetProjectStats(ctx) }()
-	go func() { defer wg.Done(); trendRows, _ = c.queries.GetProjectEventTrend(ctx) }()
-	go func() { defer wg.Done(); releaseRows, _ = c.queries.GetProjectLatestRelease(ctx) }()
-	go func() { defer wg.Done(); weeklyRows, _ = c.queries.GetProjectWeeklyErrors(ctx) }()
+	go func() { defer wg.Done(); stats, _ = queries.GetProjectStats(ctx) }()
+	go func() { defer wg.Done(); trendRows, _ = queries.GetProjectEventTrend(ctx) }()
+	go func() { defer wg.Done(); releaseRows, _ = queries.GetProjectLatestRelease(ctx) }()
+	go func() { defer wg.Done(); weeklyRows, _ = queries.GetProjectWeeklyErrors(ctx) }()
 	wg.Wait()
 
-	// Build maps
 	statsMap := make(map[uuid.UUID]db.GetProjectStatsRow, len(stats))
 	for _, s := range stats {
 		statsMap[s.ProjectID] = s
@@ -125,10 +169,6 @@ func (c *StatsCache) rebuild(ctx context.Context) ([]ProjectListItem, error) {
 		}
 		result[i] = item
 	}
-
-	c.data = result
-	c.valid = true
-	c.buildAt = time.Now()
 
 	return result, nil
 }
