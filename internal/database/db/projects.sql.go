@@ -142,6 +142,7 @@ SELECT project_id,
        COUNT(*)::int as count
 FROM events
 WHERE timestamp >= now() - interval '14 days'
+  AND level IN ('error', 'fatal')
 GROUP BY project_id, bucket
 ORDER BY project_id, bucket
 `
@@ -197,6 +198,7 @@ const getProjectLatestRelease = `-- name: GetProjectLatestRelease :many
 SELECT DISTINCT ON (project_id) project_id, release
 FROM events
 WHERE release != ''
+  AND level IN ('error', 'fatal')
 ORDER BY project_id, timestamp DESC
 `
 
