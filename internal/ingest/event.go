@@ -140,17 +140,29 @@ func (e *SentryEvent) ComputeFingerprint() string {
 func (e *SentryEvent) defaultFingerprint() string {
 	hasher := sha256.New()
 
-	// For exceptions: hash type + in-app frames
+	// For exceptions: hash type + relevant frames
 	if e.Exception != nil && len(e.Exception.Values) > 0 {
 		for _, exc := range e.Exception.Values {
 			hasher.Write([]byte(exc.Type))
 
-			if exc.Stacktrace != nil {
-				for _, frame := range exc.Stacktrace.Frames {
-					if frame.InApp != nil && !*frame.InApp {
-						continue
+			if exc.Stacktrace != nil && len(exc.Stacktrace.Frames) > 0 {
+				// Check if throw point (innermost frame) is in_app
+				innermost := exc.Stacktrace.Frames[len(exc.Stacktrace.Frames)-1]
+				throwIsInApp := innermost.InApp != nil && *innermost.InApp
+
+				if throwIsInApp {
+					// Exception thrown in app code: group by in_app frames
+					for _, frame := range exc.Stacktrace.Frames {
+						if frame.InApp != nil && *frame.InApp {
+							parts := []string{frame.Module, frame.Function, frame.Filename}
+							hasher.Write([]byte(strings.Join(parts, "|")))
+						}
 					}
-					parts := []string{frame.Module, frame.Function, frame.Filename}
+				} else {
+					// Exception thrown in vendor/library: different app call paths
+					// (middleware, controllers) lead to the same library bug.
+					// Group by throw location only, ignoring caller variation.
+					parts := []string{innermost.Module, innermost.Function, innermost.Filename}
 					hasher.Write([]byte(strings.Join(parts, "|")))
 				}
 			}
