@@ -17,6 +17,7 @@ import (
 	"github.com/darkspock/gosnag/internal/ingest"
 	"github.com/darkspock/gosnag/internal/issue"
 	"github.com/darkspock/gosnag/internal/jira"
+	"github.com/darkspock/gosnag/internal/n1"
 	"github.com/darkspock/gosnag/internal/priority"
 	"github.com/darkspock/gosnag/internal/project"
 	"github.com/darkspock/gosnag/internal/tags"
@@ -80,6 +81,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 		func(projectID uuid.UUID, iss db.Issue, eventData json.RawMessage) {
 			go priority.Evaluate(context.Background(), queries, projectID, iss, eventData)
 			go tags.AutoTag(context.Background(), queries, projectID, iss, eventData)
+			go n1.ExtractAndStore(context.Background(), queries, projectID, eventData)
 		},
 	)
 
@@ -125,10 +127,10 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 			r.With(auth.RequireAdmin).Delete("/{group_id}", projectHandler.DeleteGroup)
 		})
 
-		// Favorites
+		// Favorites (write permission required — mutates server state)
 		r.Get("/favorites", projectHandler.ListFavorites)
-		r.Put("/projects/{project_id}/favorite", projectHandler.AddFavorite)
-		r.Delete("/projects/{project_id}/favorite", projectHandler.RemoveFavorite)
+		r.With(auth.RequireWritePermission).Put("/projects/{project_id}/favorite", projectHandler.AddFavorite)
+		r.With(auth.RequireWritePermission).Delete("/projects/{project_id}/favorite", projectHandler.RemoveFavorite)
 
 		// Projects
 		r.Route("/projects", func(r chi.Router) {
@@ -146,8 +148,8 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 					r.With(auth.RequireAdmin).Delete("/{tokenId}", projectHandler.DeleteToken)
 				})
 
-				// Jira integration
-				r.Post("/jira/test", jiraHandler.TestConnection)
+				// Jira integration (test uses stored credentials — admin only)
+				r.With(auth.RequireAdmin).Post("/jira/test", jiraHandler.TestConnection)
 				r.Route("/jira/rules", func(r chi.Router) {
 					r.Get("/", jiraHandler.ListRules)
 					r.With(auth.RequireAdmin).Post("/", jiraHandler.CreateRule)
@@ -201,7 +203,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 			})
 		})
 
-		// Users (admin only for write, session only)
+		// Users (list strips google_id; write operations admin only)
 		r.Route("/users", func(r chi.Router) {
 			r.Get("/", userHandler.List)
 			r.With(auth.RequireAdmin).Post("/invite", userHandler.Invite)

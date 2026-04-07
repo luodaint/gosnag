@@ -236,7 +236,7 @@ export default function ProjectSettings() {
     setAlertConfig(
       a.alert_type === 'email'
         ? (a.config as { recipients?: string[] }).recipients?.join(', ') || ''
-        : (a.config as { webhook_url?: string }).webhook_url || ''
+        : (a.config as { webhook_url?: string }).webhook_url || ''  // will be empty when redacted
     )
     // If conditions JSONB exists, use it; otherwise auto-convert legacy fields
     if (a.conditions) {
@@ -252,7 +252,7 @@ export default function ProjectSettings() {
     try {
       const config = alertType === 'email'
         ? { recipients: alertConfig.split(',').map(s => s.trim()).filter(Boolean) }
-        : { webhook_url: alertConfig.trim() }
+        : { webhook_url: alertConfig.trim() }  // empty = server preserves existing
       const hasConditions = alertConditions.conditions.length > 0
       const conditionsPayload = hasConditions ? alertConditions : undefined
 
@@ -293,7 +293,7 @@ export default function ProjectSettings() {
     if (!projectId) return
     const config = a.alert_type === 'email'
       ? { recipients: (a.config as { recipients?: string[] }).recipients || [] }
-      : { webhook_url: (a.config as { webhook_url?: string }).webhook_url || '' }
+      : { webhook_url: '' }  // empty = server preserves existing webhook
     await api.updateAlert(projectId, a.id, {
       config,
       enabled: !a.enabled,
@@ -552,7 +552,9 @@ export default function ProjectSettings() {
     if (a.alert_type === 'email') {
       return (a.config as { recipients?: string[] }).recipients?.join(', ') || ''
     }
-    return (a.config as { webhook_url?: string }).webhook_url || ''
+    const cfg = a.config as { webhook_url?: string; webhook_url_set?: boolean }
+    if (cfg.webhook_url_set && !cfg.webhook_url) return 'Webhook configured'
+    return cfg.webhook_url || ''
   }
 
   const canTestJira = Boolean(

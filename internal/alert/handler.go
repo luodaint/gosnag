@@ -136,10 +136,20 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// For Slack alerts, preserve existing webhook_url if not provided in the request
+	// (the API redacts webhook_url on read, so clients may send updates without it)
+	finalConfig := req.Config
+	for _, a := range existing {
+		if a.ID == alertID && a.AlertType == "slack" {
+			finalConfig = preserveSlackWebhook(a.Config, req.Config)
+			break
+		}
+	}
+
 	config, err := h.queries.UpdateAlertConfig(r.Context(), db.UpdateAlertConfigParams{
 		ID:             alertID,
 		ProjectID:      projectID,
-		Config:         req.Config,
+		Config:         finalConfig,
 		Enabled:        req.Enabled,
 		LevelFilter:    req.LevelFilter,
 		TitlePattern:   req.TitlePattern,
@@ -211,7 +221,7 @@ func toSafeAlert(a db.AlertConfig) map[string]any {
 		"id":              a.ID,
 		"project_id":      a.ProjectID,
 		"alert_type":      a.AlertType,
-		"config":          a.Config,
+		"config":          redactAlertConfig(a.AlertType, a.Config),
 		"enabled":         a.Enabled,
 		"level_filter":    a.LevelFilter,
 		"title_pattern":   a.TitlePattern,
@@ -229,12 +239,59 @@ func toSafeAlert(a db.AlertConfig) map[string]any {
 	return m
 }
 
+// redactAlertConfig strips secrets from alert config for API responses.
+// Slack webhook URLs are replaced with a masked indicator.
+func redactAlertConfig(alertType string, raw json.RawMessage) json.RawMessage {
+	switch alertType {
+	case "slack":
+		var cfg map[string]any
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return raw
+		}
+		if url, ok := cfg["webhook_url"].(string); ok && url != "" {
+			cfg["webhook_url_set"] = true
+			delete(cfg, "webhook_url")
+		}
+		out, _ := json.Marshal(cfg)
+		return out
+	default:
+		return raw
+	}
+}
+
 func toSafeAlerts(configs []db.AlertConfig) []map[string]any {
 	result := make([]map[string]any, len(configs))
 	for i, c := range configs {
 		result[i] = toSafeAlert(c)
 	}
 	return result
+}
+
+// preserveSlackWebhook keeps the existing webhook_url when the incoming config
+// omits it (because the API redacts it on read).
+func preserveSlackWebhook(existingRaw, incomingRaw json.RawMessage) json.RawMessage {
+	var incoming map[string]any
+	if err := json.Unmarshal(incomingRaw, &incoming); err != nil {
+		return incomingRaw
+	}
+
+	// If the incoming request has a non-empty webhook_url, use it as-is
+	if url, ok := incoming["webhook_url"].(string); ok && url != "" {
+		return incomingRaw
+	}
+
+	// Otherwise, preserve the existing one
+	var existing map[string]any
+	if err := json.Unmarshal(existingRaw, &existing); err != nil {
+		return incomingRaw
+	}
+	if url, ok := existing["webhook_url"].(string); ok && url != "" {
+		incoming["webhook_url"] = url
+		out, _ := json.Marshal(incoming)
+		return out
+	}
+
+	return incomingRaw
 }
 
 func toNullJSON(raw json.RawMessage) pqtype.NullRawMessage {

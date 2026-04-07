@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
@@ -31,13 +32,42 @@ type UpdateStatusRequest struct {
 	Status string `json:"status"`
 }
 
+// SafeUser strips sensitive fields (google_id) from user responses.
+type SafeUser struct {
+	ID        uuid.UUID `json:"id"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	Role      string    `json:"role"`
+	AvatarURL string    `json:"avatar_url"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func toSafeUser(u db.User) SafeUser {
+	return SafeUser{
+		ID:        u.ID,
+		Email:     u.Email,
+		Name:      u.Name,
+		Role:      u.Role,
+		AvatarURL: u.AvatarUrl,
+		Status:    u.Status,
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
+	}
+}
+
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	users, err := h.queries.ListUsers(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list users")
 		return
 	}
-	writeJSON(w, http.StatusOK, users)
+	safe := make([]SafeUser, len(users))
+	for i, u := range users {
+		safe[i] = toSafeUser(u)
+	}
+	writeJSON(w, http.StatusOK, safe)
 }
 
 func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
