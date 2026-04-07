@@ -29,7 +29,9 @@ type CreateProjectRequest struct {
 	DefaultCooldownMinutes *int32 `json:"default_cooldown_minutes,omitempty"`
 	WarningAsError         *bool  `json:"warning_as_error,omitempty"`
 	MaxEventsPerIssue      *int32 `json:"max_events_per_issue,omitempty"`
-	JiraBaseURL            string `json:"jira_base_url"`
+	Icon                   *string `json:"icon,omitempty"`
+	Color                  *string `json:"color,omitempty"`
+	JiraBaseURL            string  `json:"jira_base_url"`
 	JiraEmail              string `json:"jira_email"`
 	JiraAPIToken           string `json:"jira_api_token"`
 	JiraProjectKey         string  `json:"jira_project_key"`
@@ -45,6 +47,9 @@ type SafeProject struct {
 	DefaultCooldownMinutes int32     `json:"default_cooldown_minutes"`
 	WarningAsError         bool      `json:"warning_as_error"`
 	MaxEventsPerIssue      int32     `json:"max_events_per_issue"`
+	Icon                   string    `json:"icon"`
+	Color                  string    `json:"color"`
+	Position               int32     `json:"position"`
 	JiraBaseURL            string    `json:"jira_base_url"`
 	JiraEmail              string    `json:"jira_email"`
 	JiraAPITokenSet        bool      `json:"jira_api_token_set"` // true if configured, never expose the value
@@ -71,6 +76,9 @@ func toSafeProject(p db.Project) SafeProject {
 		DefaultCooldownMinutes: p.DefaultCooldownMinutes,
 		WarningAsError:         p.WarningAsError,
 		MaxEventsPerIssue:      p.MaxEventsPerIssue,
+		Icon:                   p.Icon,
+		Color:                  p.Color,
+		Position:               p.Position,
 		JiraBaseURL:            p.JiraBaseUrl,
 		JiraEmail:              p.JiraEmail,
 		JiraAPITokenSet:        p.JiraApiToken != "",
@@ -268,6 +276,15 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		maxEvents = *req.MaxEventsPerIssue
 	}
 
+	icon := existing.Icon
+	if req.Icon != nil {
+		icon = *req.Icon
+	}
+	color := existing.Color
+	if req.Color != nil {
+		color = *req.Color
+	}
+
 	project, err := h.queries.UpdateProject(r.Context(), db.UpdateProjectParams{
 		ID:                     id,
 		Name:                   name,
@@ -280,6 +297,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		JiraProjectKey:         jiraProjectKey,
 		JiraIssueType:          jiraIssueType,
 		MaxEventsPerIssue:      maxEvents,
+		Icon:                   icon,
+		Color:                  color,
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -321,6 +340,30 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.queries.DeleteProject(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
 		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) Reorder(w http.ResponseWriter, r *http.Request) {
+	var req []struct {
+		ID       string `json:"id"`
+		Position int32  `json:"position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	for _, item := range req {
+		id, err := uuid.Parse(item.ID)
+		if err != nil {
+			continue
+		}
+		h.queries.UpdateProjectPosition(r.Context(), db.UpdateProjectPositionParams{
+			ID:       id,
+			Position: item.Position,
+		})
 	}
 
 	w.WriteHeader(http.StatusNoContent)

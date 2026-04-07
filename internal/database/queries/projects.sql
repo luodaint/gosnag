@@ -10,16 +10,20 @@ SELECT * FROM projects WHERE id = $1;
 SELECT * FROM projects WHERE slug = $1;
 
 -- name: ListProjects :many
-SELECT * FROM projects ORDER BY created_at DESC;
+SELECT * FROM projects ORDER BY position, created_at DESC;
 
 -- name: UpdateProject :one
 UPDATE projects
 SET name = $2, slug = $3, default_cooldown_minutes = $4, warning_as_error = $5,
     jira_base_url = $6, jira_email = $7, jira_api_token = $8, jira_project_key = $9, jira_issue_type = $10,
     max_events_per_issue = $11,
+    icon = $12, color = $13,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: UpdateProjectPosition :exec
+UPDATE projects SET position = $2 WHERE id = $1;
 
 -- name: DeleteProject :exec
 DELETE FROM projects WHERE id = $1;

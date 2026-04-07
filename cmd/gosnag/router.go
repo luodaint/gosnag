@@ -138,6 +138,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 		r.Route("/projects", func(r chi.Router) {
 			r.Get("/", projectHandler.List)
 			r.With(auth.RequireAdmin).Post("/", projectHandler.Create)
+			r.With(auth.RequireAdmin).Put("/reorder", projectHandler.Reorder)
 			r.Route("/{project_id}", func(r chi.Router) {
 				r.Get("/", projectHandler.Get)
 				r.With(auth.RequireAdmin).Put("/", projectHandler.Update)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api, type Project, type ProjectGroup } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
@@ -7,11 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { ProjectCardsSkeleton } from '@/components/ui/skeleton'
-import { Plus, FolderOpen, TrendingUp, TrendingDown, Minus, X, Pencil, Star } from 'lucide-react'
+import { Plus, FolderOpen, TrendingUp, TrendingDown, Minus, X, Pencil, Star, GripVertical } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
+import { IconPicker, resolveIcon, PROJECT_COLORS } from '@/components/ui/icon-picker'
 
-const PROJECT_COLORS = ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4']
+function hashColor(name: string) {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  return PROJECT_COLORS[Math.abs(hash) % PROJECT_COLORS.length]
+}
 
 function formatRelative(date: string) {
   const diff = Date.now() - new Date(date).getTime()
@@ -22,12 +27,6 @@ function formatRelative(date: string) {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return `${days}d ago`
-}
-
-function projectColor(name: string) {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
-  return PROJECT_COLORS[Math.abs(hash) % PROJECT_COLORS.length]
 }
 
 export default function Projects() {
@@ -47,6 +46,12 @@ export default function Projects() {
   const [groupName, setGroupName] = useState('')
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(true)
+  const isAdmin = user?.role === 'admin'
+
+  // Drag state
+  const dragItem = useRef<string | null>(null)
+  const dragOverItem = useRef<string | null>(null)
+  const [dragId, setDragId] = useState<string | null>(null)
 
   useEffect(() => {
     Promise.all([
@@ -76,8 +81,62 @@ export default function Projects() {
   ).sort((a, b) => {
     const aFav = favoriteIds.has(a.id) ? 0 : 1
     const bFav = favoriteIds.has(b.id) ? 0 : 1
-    return aFav - bFav
+    if (aFav !== bFav) return aFav - bFav
+    return (a.position ?? 0) - (b.position ?? 0)
   })
+
+  const handleIconColorChange = async (projectId: string, icon: string, color: string) => {
+    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, icon, color } : p))
+    try {
+      await api.updateProject(projectId, { icon, color })
+    } catch {
+      // revert on error
+      setProjects(await api.listProjects())
+    }
+  }
+
+  // Drag & drop handlers
+  const handleDragStart = (id: string) => {
+    dragItem.current = id
+    setDragId(id)
+  }
+
+  const handleDragEnter = (id: string) => {
+    dragOverItem.current = id
+  }
+
+  const handleDragEnd = async () => {
+    setDragId(null)
+    if (!dragItem.current || !dragOverItem.current || dragItem.current === dragOverItem.current) return
+
+    const items = [...filteredProjects]
+    const fromIdx = items.findIndex(p => p.id === dragItem.current)
+    const toIdx = items.findIndex(p => p.id === dragOverItem.current)
+    if (fromIdx < 0 || toIdx < 0) return
+
+    const [moved] = items.splice(fromIdx, 1)
+    items.splice(toIdx, 0, moved)
+
+    // Update positions
+    const reorder = items.map((p, i) => ({ id: p.id, position: i }))
+    setProjects(prev => {
+      const updated = [...prev]
+      for (const r of reorder) {
+        const idx = updated.findIndex(p => p.id === r.id)
+        if (idx >= 0) updated[idx] = { ...updated[idx], position: r.position }
+      }
+      return updated
+    })
+
+    dragItem.current = null
+    dragOverItem.current = null
+
+    try {
+      await api.reorderProjects(reorder)
+    } catch {
+      setProjects(await api.listProjects())
+    }
+  }
 
   const handleCreateGroup = async () => {
     if (!groupName.trim()) return
@@ -129,7 +188,7 @@ export default function Projects() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Projects</h1>
-        {user?.role === 'admin' && (
+        {isAdmin && (
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => { setGroupName(''); setShowCreateGroup(true) }}>
               <Plus className="h-4 w-4 mr-1" /> New Group
@@ -141,7 +200,7 @@ export default function Projects() {
         )}
       </div>
 
-      {/* Group tabs — only show if there are groups */}
+      {/* Group tabs */}
       {groups.length > 0 && (
         <div className="flex items-center gap-1 mb-4 border-b border-border/60 overflow-x-auto">
           <button
@@ -171,7 +230,7 @@ export default function Projects() {
                   {projects.filter(p => p.group_id === g.id).length}
                 </span>
               </button>
-              {user?.role === 'admin' && (
+              {isAdmin && (
                 <div className="hidden group-hover:flex items-center gap-0.5 absolute -right-1 -top-1">
                   <button
                     onClick={(e) => { e.stopPropagation(); setEditingGroup(g); setGroupName(g.name) }}
@@ -189,7 +248,7 @@ export default function Projects() {
               )}
             </div>
           ))}
-          {user?.role === 'admin' && (
+          {isAdmin && (
             <button
               onClick={() => { setGroupName(''); setShowCreateGroup(true) }}
               className="px-2 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -217,69 +276,104 @@ export default function Projects() {
             const lastWeek = p.errors_last_week ?? 0
             const diff = thisWeek - lastWeek
             const trend = p.trend ?? []
+            const cardColor = p.color || hashColor(p.name)
 
             return (
-              <Link key={p.id} to={`/projects/${p.id}`}>
-                <Card className="h-full flex flex-col transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:border-border/80 overflow-hidden">
-                  <div className="h-1" style={{ backgroundColor: projectColor(p.name) }} />
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <CardTitle className="text-lg">{p.name}</CardTitle>
-                        <p className="text-sm text-muted-foreground font-mono">{p.slug}</p>
-                      </div>
-                      <button
-                        onClick={(e) => toggleFavorite(p.id, e)}
-                        className="p-1 -mr-1 -mt-1 transition-colors"
-                      >
-                        <Star
-                          className={cn(
-                            'h-4 w-4',
-                            favoriteIds.has(p.id)
-                              ? 'fill-amber-400 text-amber-400'
-                              : 'text-muted-foreground/30 hover:text-muted-foreground'
-                          )}
-                        />
-                      </button>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-0 space-y-3 flex-1 flex flex-col">
-                    {/* Sparkline */}
-                    <div className="h-10">
-                      <ProjectSparkline data={trend} color={projectColor(p.name)} />
-                    </div>
-
-                    {/* Stats row */}
-                    <div className="grid grid-cols-2 gap-3 pt-1 border-t border-border/40 mt-auto">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-0.5">Latest Release</p>
-                        <p className="text-sm font-mono truncate">{p.latest_release || '-'}</p>
-                        {p.latest_event && (
-                          <p className="text-[10px] text-muted-foreground/50">{formatRelative(p.latest_event)}</p>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-0.5">Errors to review</p>
-                        <p className="text-2xl font-semibold font-mono leading-tight">{p.open_issues ?? 0}</p>
-                        {(thisWeek > 0 || lastWeek > 0) && (
-                          <p className="text-[10px] text-muted-foreground/50 flex items-center justify-end gap-0.5">
-                            {diff > 0 ? (
-                              <TrendingUp className="h-2.5 w-2.5 text-red-400" />
-                            ) : diff < 0 ? (
-                              <TrendingDown className="h-2.5 w-2.5 text-emerald-400" />
-                            ) : (
-                              <Minus className="h-2.5 w-2.5 text-muted-foreground/40" />
-                            )}
-                            <span className={diff > 0 ? 'text-red-400' : diff < 0 ? 'text-emerald-400' : ''}>
-                              {Math.abs(diff)} last 7d
+              <div
+                key={p.id}
+                draggable={isAdmin}
+                onDragStart={() => handleDragStart(p.id)}
+                onDragEnter={() => handleDragEnter(p.id)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => e.preventDefault()}
+                className={cn(
+                  'transition-opacity',
+                  dragId === p.id && 'opacity-40'
+                )}
+              >
+                <Link to={`/projects/${p.id}`}>
+                  <Card className="h-full flex flex-col transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:border-border/80 overflow-hidden">
+                    <div className="h-1" style={{ backgroundColor: cardColor }} />
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-2">
+                          {isAdmin ? (
+                            <IconPicker
+                              value={p.icon}
+                              color={p.color}
+                              fallbackColor={hashColor(p.name)}
+                              onChange={(icon, color) => handleIconColorChange(p.id, icon, color)}
+                            />
+                          ) : p.icon ? (
+                            <span className="flex items-center justify-center h-8 w-8">
+                              {resolveIcon(p.icon)}
                             </span>
-                          </p>
-                        )}
+                          ) : null}
+                          <div>
+                            <CardTitle className="text-lg">{p.name}</CardTitle>
+                            <p className="text-sm text-muted-foreground font-mono">{p.slug}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-0.5">
+                          {isAdmin && (
+                            <span className="p-1 text-muted-foreground/20 cursor-grab active:cursor-grabbing">
+                              <GripVertical className="h-3.5 w-3.5" />
+                            </span>
+                          )}
+                          <button
+                            onClick={(e) => toggleFavorite(p.id, e)}
+                            className="p-1 -mr-1 transition-colors"
+                          >
+                            <Star
+                              className={cn(
+                                'h-4 w-4',
+                                favoriteIds.has(p.id)
+                                  ? 'fill-amber-400 text-amber-400'
+                                  : 'text-muted-foreground/30 hover:text-muted-foreground'
+                              )}
+                            />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
+                    </CardHeader>
+                    <CardContent className="pt-0 space-y-3 flex-1 flex flex-col">
+                      {/* Sparkline */}
+                      <div className="h-10">
+                        <ProjectSparkline data={trend} color={cardColor} />
+                      </div>
+
+                      {/* Stats row */}
+                      <div className="grid grid-cols-2 gap-3 pt-1 border-t border-border/40 mt-auto">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-0.5">Latest Release</p>
+                          <p className="text-sm font-mono truncate">{p.latest_release || '-'}</p>
+                          {p.latest_event && (
+                            <p className="text-[10px] text-muted-foreground/50">{formatRelative(p.latest_event)}</p>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-0.5">Errors to review</p>
+                          <p className="text-2xl font-semibold font-mono leading-tight">{p.open_issues ?? 0}</p>
+                          {(thisWeek > 0 || lastWeek > 0) && (
+                            <p className="text-[10px] text-muted-foreground/50 flex items-center justify-end gap-0.5">
+                              {diff > 0 ? (
+                                <TrendingUp className="h-2.5 w-2.5 text-red-400" />
+                              ) : diff < 0 ? (
+                                <TrendingDown className="h-2.5 w-2.5 text-emerald-400" />
+                              ) : (
+                                <Minus className="h-2.5 w-2.5 text-muted-foreground/40" />
+                              )}
+                              <span className={diff > 0 ? 'text-red-400' : diff < 0 ? 'text-emerald-400' : ''}>
+                                {Math.abs(diff)} last 7d
+                              </span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              </div>
             )
           })}
         </div>

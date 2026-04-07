@@ -43,8 +43,10 @@ export const api = {
   getProject: (id: string) => request<ProjectWithDSN>(`/projects/${id}`),
   createProject: (data: { name: string; slug?: string; default_cooldown_minutes?: number }) =>
     request<ProjectWithDSN>('/projects', { method: 'POST', body: JSON.stringify(data) }),
-  updateProject: (id: string, data: { name: string; slug: string; default_cooldown_minutes?: number; warning_as_error?: boolean; jira_base_url?: string; jira_email?: string; jira_api_token?: string; jira_project_key?: string; jira_issue_type?: string; group_id?: string | null }) =>
+  updateProject: (id: string, data: Record<string, unknown>) =>
     request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  reorderProjects: (items: { id: string; position: number }[]) =>
+    request<void>('/projects/reorder', { method: 'PUT', body: JSON.stringify(items) }),
   deleteProject: (id: string) =>
     request<void>(`/projects/${id}`, { method: 'DELETE' }),
 
@@ -182,6 +184,9 @@ export interface Project {
   default_cooldown_minutes: number
   warning_as_error: boolean
   max_events_per_issue: number
+  icon: string
+  color: string
+  position: number
   jira_base_url: string
   jira_email: string
   jira_api_token_set: boolean
