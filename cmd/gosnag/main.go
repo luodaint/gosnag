@@ -14,6 +14,7 @@ import (
 	"github.com/darkspock/gosnag/internal/database"
 	dbpkg "github.com/darkspock/gosnag/internal/database/db"
 	"github.com/darkspock/gosnag/internal/issue"
+	n1pkg "github.com/darkspock/gosnag/internal/n1"
 )
 
 func main() {
@@ -47,6 +48,10 @@ func main() {
 	queries := dbpkg.New(db)
 	go issue.CooldownChecker(ctx, queries, 1*time.Minute)
 	go sessionCleanup(ctx, queries, 1*time.Hour)
+	go queryPatternCleanup(ctx, queries, 24*time.Hour)
+
+	n1Detector := n1pkg.NewDetector(queries, cfg.BaseURL)
+	go n1Detector.Run(ctx, 10*time.Minute)
 	if cfg.EventRetentionDays > 0 {
 		go eventRetention(ctx, queries, cfg.EventRetentionDays, 6*time.Hour)
 	}
@@ -112,6 +117,21 @@ func sessionCleanup(ctx context.Context, queries *dbpkg.Queries, interval time.D
 		case <-ticker.C:
 			if err := queries.DeleteExpiredSessions(ctx); err != nil {
 				slog.Error("session cleanup failed", "error", err)
+			}
+		}
+	}
+}
+
+func queryPatternCleanup(ctx context.Context, queries *dbpkg.Queries, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := queries.CleanupOldQueryPatterns(ctx); err != nil {
+				slog.Error("query pattern cleanup failed", "error", err)
 			}
 		}
 	}

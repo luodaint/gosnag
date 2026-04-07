@@ -168,6 +168,20 @@ type ProjectKey struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type QueryPattern struct {
+	ID              uuid.UUID `json:"id"`
+	ProjectID       uuid.UUID `json:"project_id"`
+	Transaction     string    `json:"transaction"`
+	QueryHash       string    `json:"query_hash"`
+	NormalizedQuery string    `json:"normalized_query"`
+	TableName       string    `json:"table_name"`
+	EventCount      int32     `json:"event_count"`
+	DistinctEvents  int32     `json:"distinct_events"`
+	TotalExecMs     float64   `json:"total_exec_ms"`
+	FirstSeen       time.Time `json:"first_seen"`
+	LastSeen        time.Time `json:"last_seen"`
+}
+
 type Session struct {
 	Token     string    `json:"token"`
 	UserID    uuid.UUID `json:"user_id"`
