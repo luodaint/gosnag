@@ -351,17 +351,26 @@ export default function IssueDetail() {
             </button>
             {expandedEvent === event.id && (
               <div className="px-4 pb-4 animate-fade-in">
-                <div className="flex justify-end mb-2">
+                <div className="flex justify-end gap-2 mb-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      const text = JSON.stringify(event.data, null, 2)
-                      navigator.clipboard.writeText(text)
-                      toast.success('Event data copied to clipboard')
+                      navigator.clipboard.writeText(formatEventSummary(event.data))
+                      toast.success('Summary copied')
                     }}
                   >
-                    <Copy className="h-3.5 w-3.5 mr-1" /> Copy event
+                    <Copy className="h-3.5 w-3.5 mr-1" /> Copy summary
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(JSON.stringify(event.data, null, 2))
+                      toast.success('Full event copied')
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5 mr-1" /> Copy full
                   </Button>
                 </div>
                 <EventData data={event.data} />
@@ -745,6 +754,51 @@ function UserSection({ user }: { user: { id?: string; email?: string; username?:
       </div>
     </div>
   )
+}
+
+function formatEventSummary(data: Record<string, unknown>): string {
+  const lines: string[] = []
+
+  // Error
+  const exc = data.exception as { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<{ filename: string; function: string; lineno: number; in_app?: boolean }> } }> } | undefined
+  if (exc?.values?.length) {
+    const last = exc.values[exc.values.length - 1]
+    lines.push(`Error: ${last.type}: ${last.value}`)
+  } else if (data.message) {
+    lines.push(`Error: ${data.message}`)
+  }
+
+  // Request: URL + body
+  const req = data.request as { method?: string; url?: string; data?: unknown; query_string?: string } | undefined
+  if (req) {
+    if (req.method || req.url) {
+      lines.push(`URL: ${req.method || ''} ${req.url || ''}`.trim())
+    }
+    if (req.query_string) {
+      lines.push(`Query: ${req.query_string}`)
+    }
+    if (req.data != null) {
+      const body = typeof req.data === 'string' ? req.data : JSON.stringify(req.data)
+      lines.push(`Body: ${body}`)
+    }
+  }
+
+  // Stacktrace: function + line only
+  if (exc?.values?.length) {
+    for (const e of exc.values) {
+      if (!e.stacktrace?.frames?.length) continue
+      lines.push('')
+      lines.push('Stacktrace:')
+      const frames = [...e.stacktrace.frames].reverse()
+      for (const f of frames) {
+        const marker = f.in_app ? '>' : ' '
+        const fn = f.function || '(unknown)'
+        lines.push(`  ${marker} ${fn} (${f.filename}:${f.lineno})`)
+      }
+    }
+  }
+
+  return lines.join('\n')
 }
 
 function EventData({ data }: { data: Record<string, unknown> }) {
