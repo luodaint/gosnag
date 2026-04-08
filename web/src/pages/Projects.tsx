@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useSearchParams, useNavigate } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { api, type Project, type ProjectGroup } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
