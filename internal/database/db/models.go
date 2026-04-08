@@ -93,6 +93,21 @@ type IssueAlias struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+type IssueComment struct {
+	ID        uuid.UUID `json:"id"`
+	IssueID   uuid.UUID `json:"issue_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type IssueFollow struct {
+	UserID    uuid.UUID `json:"user_id"`
+	IssueID   uuid.UUID `json:"issue_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type IssueTag struct {
 	ID        uuid.UUID `json:"id"`
 	IssueID   uuid.UUID `json:"issue_id"`

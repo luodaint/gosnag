@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/darkspock/gosnag/internal/alert"
+	"github.com/darkspock/gosnag/internal/comment"
 	"github.com/darkspock/gosnag/internal/auth"
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
@@ -71,6 +72,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	jiraHandler := jira.NewHandler(queries, cfg)
 	priorityHandler := priority.NewHandler(queries)
 	tagsHandler := tags.NewHandler(queries)
+	commentHandler := comment.NewHandler(queries)
 	oauthHandler := auth.NewOAuthHandler(queries, cfg)
 
 	alertService := alert.NewService(queries, cfg)
@@ -204,6 +206,14 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.With(auth.RequireWritePermission).Post("/tags", tagsHandler.AddTag)
 				r.With(auth.RequireWritePermission).Delete("/tags", tagsHandler.RemoveTag)
 				r.With(auth.RequireWritePermission).Post("/jira", jiraHandler.CreateTicket)
+				r.Post("/follow", issueHandler.Follow)
+				r.Delete("/follow", issueHandler.Unfollow)
+				r.Route("/comments", func(r chi.Router) {
+					r.Get("/", commentHandler.List)
+					r.With(auth.RequireWritePermission).Post("/", commentHandler.Create)
+					r.With(auth.RequireWritePermission).Put("/{comment_id}", commentHandler.Update)
+					r.With(auth.RequireWritePermission).Delete("/{comment_id}", commentHandler.Delete)
+				})
 			})
 		})
 
@@ -309,6 +319,8 @@ func buildAllowedOrigins(baseURL string, configured []string) map[string]struct{
 		"http://127.0.0.1:5173",
 		"http://localhost:4173",
 		"http://127.0.0.1:4173",
+		"http://localhost:5200",
+		"http://127.0.0.1:5200",
 	} {
 		if normalized, ok := normalizeOrigin(origin); ok {
 			out[normalized] = struct{}{}

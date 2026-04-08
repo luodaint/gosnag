@@ -51,6 +51,20 @@ type IssueWithStats struct {
 	UserCount int32      `json:"user_count"`
 	Trend     []int32    `json:"trend"`
 	Tags      []IssueTag `json:"tags"`
+	Followed  bool       `json:"followed"`
+}
+
+func rowToIssue(r db.ListIssuesByProjectRow) db.Issue {
+	return db.Issue{
+		ID: r.ID, ProjectID: r.ProjectID, Title: r.Title, Fingerprint: r.Fingerprint,
+		Status: r.Status, Level: r.Level, Platform: r.Platform, FirstSeen: r.FirstSeen,
+		LastSeen: r.LastSeen, EventCount: r.EventCount, AssignedTo: r.AssignedTo,
+		ResolvedAt: r.ResolvedAt, CooldownUntil: r.CooldownUntil,
+		ResolvedInRelease: r.ResolvedInRelease, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		SnoozeUntil: r.SnoozeUntil, SnoozeEventThreshold: r.SnoozeEventThreshold,
+		SnoozeEventsAtStart: r.SnoozeEventsAtStart, JiraTicketKey: r.JiraTicketKey,
+		JiraTicketUrl: r.JiraTicketUrl, Priority: r.Priority, Culprit: r.Culprit,
+	}
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +96,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var followerID uuid.NullUUID
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		followerID = uuid.NullUUID{UUID: user.ID, Valid: true}
+	}
+
 	issues, err := h.queries.ListIssuesByProject(r.Context(), db.ListIssuesByProjectParams{
 		ProjectID:      projectID,
 		Column2:        status,
@@ -89,6 +108,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Offset:         int32(offset),
 		Column5:        todayOnly,
 		Column6:        assignedAny,
+		FollowerID:     followerID,
 		AssignedToUser: assignedToUser,
 		LevelFilter:    level,
 		Search:         search,
@@ -96,6 +116,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
 		return
+	}
+
+	// Convert rows to enrichable structs
+	followedMap := make(map[uuid.UUID]bool, len(issues))
+	converted := make([]db.Issue, len(issues))
+	for i, row := range issues {
+		converted[i] = rowToIssue(row)
+		if row.Followed {
+			followedMap[row.ID] = true
+		}
 	}
 
 	// When tag filter is present, expand results with tag-matched issues and deduplicate
@@ -112,9 +142,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			for _, id := range tagIssueIDs {
 				tagAllowed[id] = true
 			}
-			// Batch-load tag-matched issues not in current page
-			existing := make(map[uuid.UUID]bool, len(issues))
-			for _, iss := range issues {
+			existing := make(map[uuid.UUID]bool, len(converted))
+			for _, iss := range converted {
 				existing[iss.ID] = true
 			}
 			var missing []uuid.UUID
@@ -126,7 +155,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			if len(missing) > 0 {
 				extra, err := h.queries.ListIssuesByIDs(r.Context(), missing)
 				if err == nil {
-					issues = append(issues, extra...)
+					converted = append(converted, extra...)
 				}
 			}
 		}
@@ -144,7 +173,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Adjust count when tag filter adds extra results
 	if tagAllowed != nil {
-		count = int64(len(issues))
+		count = int64(len(converted))
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count issues")
@@ -152,14 +181,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enrich with user counts and trends
-	enriched := make([]IssueWithStats, len(issues))
-	for i, iss := range issues {
-		enriched[i] = IssueWithStats{Issue: iss}
+	enriched := make([]IssueWithStats, len(converted))
+	for i, iss := range converted {
+		enriched[i] = IssueWithStats{Issue: iss, Followed: followedMap[iss.ID]}
 	}
 
-	if len(issues) > 0 {
-		ids := make([]uuid.UUID, len(issues))
-		for i, iss := range issues {
+	if len(converted) > 0 {
+		ids := make([]uuid.UUID, len(converted))
+		for i, iss := range converted {
 			ids[i] = iss.ID
 		}
 
@@ -241,6 +270,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		m["user_count"] = e.UserCount
 		m["trend"] = e.Trend
 		m["tags"] = e.Tags
+		m["followed"] = e.Followed
 		safeIssues[i] = m
 	}
 
@@ -252,12 +282,33 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type Follower struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.getIssueScoped(w, r)
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, issueJSON(issue))
+	m := issueJSON(issue)
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		f, err := h.queries.IsFollowingIssue(r.Context(), db.IsFollowingIssueParams{UserID: user.ID, IssueID: issue.ID})
+		if err == nil {
+			m["followed"] = f
+		}
+	}
+	followers, err := h.queries.ListIssueFollowers(r.Context(), issue.ID)
+	if err == nil && len(followers) > 0 {
+		out := make([]Follower, len(followers))
+		for i, f := range followers {
+			out[i] = Follower{ID: f.ID.String(), Name: f.Name, Email: f.Email}
+		}
+		m["followers"] = out
+	}
+	writeJSON(w, http.StatusOK, m)
 }
 
 func (h *Handler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
@@ -582,6 +633,36 @@ func issueJSON(i db.Issue) map[string]any {
 		"culprit":              i.Culprit,
 	}
 	return m
+}
+
+func (h *Handler) Follow(w http.ResponseWriter, r *http.Request) {
+	issueID, err := uuid.Parse(chi.URLParam(r, "issue_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid issue id")
+		return
+	}
+	user := auth.GetUserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	h.queries.FollowIssue(r.Context(), db.FollowIssueParams{UserID: user.ID, IssueID: issueID})
+	writeJSON(w, http.StatusOK, map[string]bool{"followed": true})
+}
+
+func (h *Handler) Unfollow(w http.ResponseWriter, r *http.Request) {
+	issueID, err := uuid.Parse(chi.URLParam(r, "issue_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid issue id")
+		return
+	}
+	user := auth.GetUserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	h.queries.UnfollowIssue(r.Context(), db.UnfollowIssueParams{UserID: user.ID, IssueID: issueID})
+	writeJSON(w, http.StatusOK, map[string]bool{"followed": false})
 }
 
 func nullString(ns sql.NullString) any {

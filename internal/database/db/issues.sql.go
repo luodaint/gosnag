@@ -180,6 +180,20 @@ func (q *Queries) DeleteIssues(ctx context.Context, arg DeleteIssuesParams) (sql
 	return q.db.ExecContext(ctx, deleteIssues, pq.Array(arg.Ids), arg.ProjectID)
 }
 
+const followIssue = `-- name: FollowIssue :exec
+INSERT INTO issue_follows (user_id, issue_id) VALUES ($1, $2) ON CONFLICT DO NOTHING
+`
+
+type FollowIssueParams struct {
+	UserID  uuid.UUID `json:"user_id"`
+	IssueID uuid.UUID `json:"issue_id"`
+}
+
+func (q *Queries) FollowIssue(ctx context.Context, arg FollowIssueParams) error {
+	_, err := q.db.ExecContext(ctx, followIssue, arg.UserID, arg.IssueID)
+	return err
+}
+
 const getExpiredCooldownIssues = `-- name: GetExpiredCooldownIssues :many
 SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit FROM issues
 WHERE status = 'resolved'
@@ -408,6 +422,82 @@ func (q *Queries) GetIssueCountsByStatus(ctx context.Context, arg GetIssueCounts
 	return items, nil
 }
 
+const isFollowingIssue = `-- name: IsFollowingIssue :one
+SELECT EXISTS(SELECT 1 FROM issue_follows WHERE user_id = $1 AND issue_id = $2)::bool AS following
+`
+
+type IsFollowingIssueParams struct {
+	UserID  uuid.UUID `json:"user_id"`
+	IssueID uuid.UUID `json:"issue_id"`
+}
+
+func (q *Queries) IsFollowingIssue(ctx context.Context, arg IsFollowingIssueParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, isFollowingIssue, arg.UserID, arg.IssueID)
+	var following bool
+	err := row.Scan(&following)
+	return following, err
+}
+
+const listFollowedIssueIDs = `-- name: ListFollowedIssueIDs :many
+SELECT issue_id FROM issue_follows WHERE user_id = $1
+`
+
+func (q *Queries) ListFollowedIssueIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, listFollowedIssueIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var issue_id uuid.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueFollowers = `-- name: ListIssueFollowers :many
+SELECT u.id, u.name, u.email FROM issue_follows f JOIN users u ON u.id = f.user_id WHERE f.issue_id = $1 ORDER BY f.created_at
+`
+
+type ListIssueFollowersRow struct {
+	ID    uuid.UUID `json:"id"`
+	Name  string    `json:"name"`
+	Email string    `json:"email"`
+}
+
+func (q *Queries) ListIssueFollowers(ctx context.Context, issueID uuid.UUID) ([]ListIssueFollowersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listIssueFollowers, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueFollowersRow{}
+	for rows.Next() {
+		var i ListIssueFollowersRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Email); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssuesByIDs = `-- name: ListIssuesByIDs :many
 SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit FROM issues WHERE id = ANY($1::uuid[]) ORDER BY last_seen DESC
 `
@@ -461,19 +551,20 @@ func (q *Queries) ListIssuesByIDs(ctx context.Context, ids []uuid.UUID) ([]Issue
 
 const listIssuesByProject = `-- name: ListIssuesByProject :many
 
-SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit FROM issues
-WHERE project_id = $1
-  AND ($2::text = '' OR status = $2::text)
-  AND (NOT $5::bool OR first_seen >= CURRENT_DATE)
-  AND (NOT $6::bool OR assigned_to IS NOT NULL)
-  AND ($7::uuid IS NULL OR assigned_to = $7)
-  AND ($8::text = '' OR level = $8::text
-    OR ($8::text = 'errors' AND level IN ('error', 'fatal'))
-    OR ($8::text = 'errors_w' AND level IN ('error', 'fatal', 'warning'))
-    OR ($8::text = 'informational' AND level IN ('warning', 'info', 'debug'))
-    OR ($8::text = 'info_only' AND level IN ('info', 'debug')))
-  AND ($9::text = '' OR title ILIKE '%' || $9::text || '%')
-ORDER BY last_seen DESC
+SELECT i.id, i.project_id, i.title, i.fingerprint, i.status, i.level, i.platform, i.first_seen, i.last_seen, i.event_count, i.assigned_to, i.resolved_at, i.cooldown_until, i.resolved_in_release, i.created_at, i.updated_at, i.snooze_until, i.snooze_event_threshold, i.snooze_events_at_start, i.jira_ticket_key, i.jira_ticket_url, i.priority, i.culprit, EXISTS(SELECT 1 FROM issue_follows f WHERE f.issue_id = i.id AND f.user_id = $7::uuid) AS followed
+FROM issues i
+WHERE i.project_id = $1
+  AND ($2::text = '' OR i.status = $2::text)
+  AND (NOT $5::bool OR i.first_seen >= CURRENT_DATE)
+  AND (NOT $6::bool OR i.assigned_to IS NOT NULL)
+  AND ($8::uuid IS NULL OR i.assigned_to = $8)
+  AND ($9::text = '' OR i.level = $9::text
+    OR ($9::text = 'errors' AND i.level IN ('error', 'fatal'))
+    OR ($9::text = 'errors_w' AND i.level IN ('error', 'fatal', 'warning'))
+    OR ($9::text = 'informational' AND i.level IN ('warning', 'info', 'debug'))
+    OR ($9::text = 'info_only' AND i.level IN ('info', 'debug')))
+  AND ($10::text = '' OR i.title ILIKE '%' || $10::text || '%')
+ORDER BY followed DESC, i.last_seen DESC
 LIMIT $3 OFFSET $4
 `
 
@@ -484,9 +575,37 @@ type ListIssuesByProjectParams struct {
 	Offset         int32         `json:"offset"`
 	Column5        bool          `json:"column_5"`
 	Column6        bool          `json:"column_6"`
+	FollowerID     uuid.NullUUID `json:"follower_id"`
 	AssignedToUser uuid.NullUUID `json:"assigned_to_user"`
 	LevelFilter    string        `json:"level_filter"`
 	Search         string        `json:"search"`
+}
+
+type ListIssuesByProjectRow struct {
+	ID                   uuid.UUID      `json:"id"`
+	ProjectID            uuid.UUID      `json:"project_id"`
+	Title                string         `json:"title"`
+	Fingerprint          string         `json:"fingerprint"`
+	Status               string         `json:"status"`
+	Level                string         `json:"level"`
+	Platform             string         `json:"platform"`
+	FirstSeen            time.Time      `json:"first_seen"`
+	LastSeen             time.Time      `json:"last_seen"`
+	EventCount           int32          `json:"event_count"`
+	AssignedTo           uuid.NullUUID  `json:"assigned_to"`
+	ResolvedAt           sql.NullTime   `json:"resolved_at"`
+	CooldownUntil        sql.NullTime   `json:"cooldown_until"`
+	ResolvedInRelease    sql.NullString `json:"resolved_in_release"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+	SnoozeUntil          sql.NullTime   `json:"snooze_until"`
+	SnoozeEventThreshold sql.NullInt32  `json:"snooze_event_threshold"`
+	SnoozeEventsAtStart  int32          `json:"snooze_events_at_start"`
+	JiraTicketKey        sql.NullString `json:"jira_ticket_key"`
+	JiraTicketUrl        sql.NullString `json:"jira_ticket_url"`
+	Priority             int32          `json:"priority"`
+	Culprit              string         `json:"culprit"`
+	Followed             bool           `json:"followed"`
 }
 
 // Level filter macro (repeated in each query):
@@ -494,7 +613,7 @@ type ListIssuesByProjectParams struct {
 //	'' = all, 'errors' = error+fatal, 'errors_w' = error+fatal+warning,
 //	'informational' = warning+info+debug, 'info_only' = info+debug,
 //	or exact level name
-func (q *Queries) ListIssuesByProject(ctx context.Context, arg ListIssuesByProjectParams) ([]Issue, error) {
+func (q *Queries) ListIssuesByProject(ctx context.Context, arg ListIssuesByProjectParams) ([]ListIssuesByProjectRow, error) {
 	rows, err := q.db.QueryContext(ctx, listIssuesByProject,
 		arg.ProjectID,
 		arg.Column2,
@@ -502,6 +621,7 @@ func (q *Queries) ListIssuesByProject(ctx context.Context, arg ListIssuesByProje
 		arg.Offset,
 		arg.Column5,
 		arg.Column6,
+		arg.FollowerID,
 		arg.AssignedToUser,
 		arg.LevelFilter,
 		arg.Search,
@@ -510,9 +630,9 @@ func (q *Queries) ListIssuesByProject(ctx context.Context, arg ListIssuesByProje
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Issue{}
+	items := []ListIssuesByProjectRow{}
 	for rows.Next() {
-		var i Issue
+		var i ListIssuesByProjectRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -537,6 +657,7 @@ func (q *Queries) ListIssuesByProject(ctx context.Context, arg ListIssuesByProje
 			&i.JiraTicketUrl,
 			&i.Priority,
 			&i.Culprit,
+			&i.Followed,
 		); err != nil {
 			return nil, err
 		}
@@ -603,6 +724,20 @@ func (q *Queries) ListOpenN1Issues(ctx context.Context, projectID uuid.UUID) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const unfollowIssue = `-- name: UnfollowIssue :exec
+DELETE FROM issue_follows WHERE user_id = $1 AND issue_id = $2
+`
+
+type UnfollowIssueParams struct {
+	UserID  uuid.UUID `json:"user_id"`
+	IssueID uuid.UUID `json:"issue_id"`
+}
+
+func (q *Queries) UnfollowIssue(ctx context.Context, arg UnfollowIssueParams) error {
+	_, err := q.db.ExecContext(ctx, unfollowIssue, arg.UserID, arg.IssueID)
+	return err
 }
 
 const updateIssueStatus = `-- name: UpdateIssueStatus :one

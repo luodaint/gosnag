@@ -20,19 +20,20 @@ SELECT * FROM issues WHERE id = $1;
 --   or exact level name
 
 -- name: ListIssuesByProject :many
-SELECT * FROM issues
-WHERE project_id = $1
-  AND ($2::text = '' OR status = $2::text)
-  AND (NOT $5::bool OR first_seen >= CURRENT_DATE)
-  AND (NOT $6::bool OR assigned_to IS NOT NULL)
-  AND (sqlc.narg('assigned_to_user')::uuid IS NULL OR assigned_to = sqlc.narg('assigned_to_user'))
-  AND (sqlc.arg('level_filter')::text = '' OR level = sqlc.arg('level_filter')::text
-    OR (sqlc.arg('level_filter')::text = 'errors' AND level IN ('error', 'fatal'))
-    OR (sqlc.arg('level_filter')::text = 'errors_w' AND level IN ('error', 'fatal', 'warning'))
-    OR (sqlc.arg('level_filter')::text = 'informational' AND level IN ('warning', 'info', 'debug'))
-    OR (sqlc.arg('level_filter')::text = 'info_only' AND level IN ('info', 'debug')))
-  AND (sqlc.arg('search')::text = '' OR title ILIKE '%' || sqlc.arg('search')::text || '%')
-ORDER BY last_seen DESC
+SELECT i.*, EXISTS(SELECT 1 FROM issue_follows f WHERE f.issue_id = i.id AND f.user_id = sqlc.narg('follower_id')::uuid) AS followed
+FROM issues i
+WHERE i.project_id = $1
+  AND ($2::text = '' OR i.status = $2::text)
+  AND (NOT $5::bool OR i.first_seen >= CURRENT_DATE)
+  AND (NOT $6::bool OR i.assigned_to IS NOT NULL)
+  AND (sqlc.narg('assigned_to_user')::uuid IS NULL OR i.assigned_to = sqlc.narg('assigned_to_user'))
+  AND (sqlc.arg('level_filter')::text = '' OR i.level = sqlc.arg('level_filter')::text
+    OR (sqlc.arg('level_filter')::text = 'errors' AND i.level IN ('error', 'fatal'))
+    OR (sqlc.arg('level_filter')::text = 'errors_w' AND i.level IN ('error', 'fatal', 'warning'))
+    OR (sqlc.arg('level_filter')::text = 'informational' AND i.level IN ('warning', 'info', 'debug'))
+    OR (sqlc.arg('level_filter')::text = 'info_only' AND i.level IN ('info', 'debug')))
+  AND (sqlc.arg('search')::text = '' OR i.title ILIKE '%' || sqlc.arg('search')::text || '%')
+ORDER BY followed DESC, i.last_seen DESC
 LIMIT $3 OFFSET $4;
 
 -- name: CountIssuesByProject :one
@@ -129,6 +130,21 @@ SELECT * FROM issues WHERE id = ANY(@ids::uuid[]) ORDER BY last_seen DESC;
 
 -- name: GetIssueByFingerprint :one
 SELECT * FROM issues WHERE project_id = $1 AND fingerprint = $2;
+
+-- name: FollowIssue :exec
+INSERT INTO issue_follows (user_id, issue_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+
+-- name: UnfollowIssue :exec
+DELETE FROM issue_follows WHERE user_id = $1 AND issue_id = $2;
+
+-- name: ListFollowedIssueIDs :many
+SELECT issue_id FROM issue_follows WHERE user_id = $1;
+
+-- name: IsFollowingIssue :one
+SELECT EXISTS(SELECT 1 FROM issue_follows WHERE user_id = $1 AND issue_id = $2)::bool AS following;
+
+-- name: ListIssueFollowers :many
+SELECT u.id, u.name, u.email FROM issue_follows f JOIN users u ON u.id = f.user_id WHERE f.issue_id = $1 ORDER BY f.created_at;
 
 -- name: ListOpenN1Issues :many
 SELECT * FROM issues

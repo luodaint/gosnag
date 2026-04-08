@@ -1,14 +1,14 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type Issue, type Event, type User, type Project, type IssueTag } from '@/lib/api'
+import { useAuth } from '@/lib/use-auth'
+import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
-import { Check, X, EyeOff, RotateCcw, ChevronDown, ChevronLeft, ChevronRight, Clock, Trash2, ExternalLink, Plus, Copy } from 'lucide-react'
+import { Check, X, EyeOff, Bookmark, RotateCcw, ChevronDown, ChevronLeft, ChevronRight, Clock, Trash2, ExternalLink, Plus, Copy, MessageSquare, Pencil, Send } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
@@ -20,6 +20,7 @@ import { useKeyboardShortcut } from '@/lib/use-keyboard'
 export default function IssueDetail() {
   const { projectId, issueId } = useParams<{ projectId: string; issueId: string }>()
   const navigate = useNavigate()
+  const { user: currentUser } = useAuth()
   const [issue, setIssue] = useState<Issue | null>(null)
   const [project, setProject] = useState<Project | null>(null)
   const [events, setEvents] = useState<Event[]>([])
@@ -37,19 +38,28 @@ export default function IssueDetail() {
   const [creatingJira, setCreatingJira] = useState(false)
   const [issueTags, setIssueTags] = useState<IssueTag[]>([])
   const [tagInput, setTagInput] = useState('')
+  const [followed, setFollowed] = useState(false)
+  const [followers, setFollowers] = useState<{ id: string; name: string; email: string }[]>([])
+  const [comments, setComments] = useState<IssueComment[]>([])
+  const [commentBody, setCommentBody] = useState('')
+  const [editingComment, setEditingComment] = useState<string | null>(null)
+  const [editBody, setEditBody] = useState('')
+  const [submittingComment, setSubmittingComment] = useState(false)
   const eventLimit = 25
 
   useEffect(() => {
     if (!projectId || !issueId) return
     Promise.all([
       api.getProject(projectId).then(setProject),
-      api.getIssue(projectId, issueId).then(setIssue),
+      api.getIssue(projectId, issueId).then(i => { setIssue(i); setFollowed(!!i.followed); setFollowers(i.followers || []) }),
       api.listEvents(projectId, issueId, { limit: eventLimit, offset: 0 }).then(r => {
         setEvents(r.events)
         setEventTotal(r.total)
+        if (r.events.length > 0) setExpandedEvent(r.events[0].id)
       }),
       api.listUsers().then(setUsers),
       api.listIssueTags(projectId, issueId).then(setIssueTags),
+      api.listComments(projectId, issueId).then(setComments),
     ]).finally(() => setLoading(false))
   }, [projectId, issueId])
 
@@ -180,15 +190,36 @@ export default function IssueDetail() {
 
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1
-            className={cn(
-              'text-xl font-semibold mb-2',
-              !titleExpanded && 'line-clamp-3 cursor-pointer'
-            )}
-            onClick={() => !titleExpanded && setTitleExpanded(true)}
-            title={!titleExpanded ? 'Click to expand' : undefined}
-          >{issue.title}</h1>
-          <div className="flex items-center gap-2 flex-wrap">
+          {project?.issue_display_mode === 'detailed' ? (() => {
+            const colonIdx = issue.title.indexOf(': ')
+            const exceptionType = colonIdx > 0 && colonIdx < 60 ? issue.title.slice(0, colonIdx) : ''
+            const message = exceptionType ? issue.title.slice(colonIdx + 2) : issue.title
+            return (
+              <>
+                {issue.culprit && (
+                  <h1 className="text-xl font-semibold mb-1">{issue.culprit}</h1>
+                )}
+                <p className="text-base text-muted-foreground mb-2">
+                  {exceptionType ? <>{exceptionType}{message && <> - {message}</>}</> : issue.title}
+                </p>
+              </>
+            )
+          })() : (
+            <>
+              <h1
+                className={cn(
+                  'text-xl font-semibold mb-1',
+                  !titleExpanded && 'line-clamp-3 cursor-pointer'
+                )}
+                onClick={() => !titleExpanded && setTitleExpanded(true)}
+                title={!titleExpanded ? 'Click to expand' : undefined}
+              >{issue.title}</h1>
+              {issue.culprit && (
+                <p className="text-sm text-muted-foreground font-mono mb-2">{issue.culprit}</p>
+              )}
+            </>
+          )}
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-nowrap">
             <Badge variant={issue.level === 'error' || issue.level === 'fatal' ? 'error' : 'warning'}>
               {issue.level}
             </Badge>
@@ -196,46 +227,58 @@ export default function IssueDetail() {
               {issue.status}
             </Badge>
             {issue.status === 'snoozed' && issue.snooze_until && (
-              <span className="text-xs text-muted-foreground font-mono">
-                until {new Date(issue.snooze_until).toLocaleString()}
-              </span>
+              <span className="font-mono">until {new Date(issue.snooze_until).toLocaleString()}</span>
             )}
             {issue.status === 'snoozed' && issue.snooze_event_threshold && (
-              <span className="text-xs text-muted-foreground font-mono">
-                until {issue.snooze_event_threshold - (issue.event_count - issue.snooze_events_at_start)} more events
-              </span>
+              <span className="font-mono">until {issue.snooze_event_threshold - (issue.event_count - issue.snooze_events_at_start)} more events</span>
             )}
             {issue.status === 'resolved' && issue.cooldown_until && (
-              <span className="text-xs text-muted-foreground font-mono">
-                cooldown until {new Date(issue.cooldown_until).toLocaleString()}
-              </span>
+              <span className="font-mono">cooldown until {new Date(issue.cooldown_until).toLocaleString()}</span>
             )}
-            <span className="text-sm text-muted-foreground">
-              <span className="font-mono">{issue.event_count}</span> events
-              <span className="mx-1.5 opacity-40">&middot;</span>
-              <span className="font-mono text-xs">{issue.platform}</span>
-            </span>
+            <span className="opacity-30 shrink-0">&middot;</span>
+            <span className="font-mono shrink-0">{issue.event_count} events</span>
+            <span className="opacity-30 shrink-0">&middot;</span>
+            <span className="shrink-0">{issue.platform}</span>
+            <span className="opacity-30 shrink-0">&middot;</span>
+            <span className="font-mono shrink-0">{new Date(issue.first_seen).toLocaleDateString()} &ndash; {new Date(issue.last_seen).toLocaleDateString()}</span>
+            {followers.length > 0 && (
+              <>
+                <span className="opacity-30 shrink-0">&middot;</span>
+                <span className="truncate min-w-0">
+                  <Bookmark className="h-3 w-3 inline mr-0.5 text-primary fill-primary" />
+                  Followed by {followers.map(f => f.name || f.email).join(', ')}
+                </span>
+              </>
+            )}
           </div>
-
-          {/* Tags */}
-          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1.5">
+            <Select
+              value={issue.assigned_to || ''}
+              onChange={e => handleAssign(e.target.value)}
+              className="h-5 text-xs w-auto py-0 px-1"
+            >
+              <option value="">Unassigned</option>
+              {users.map(u => (
+                <option key={u.id} value={u.id}>{u.name || u.email}</option>
+              ))}
+            </Select>
             {issueTags.map(t => (
-              <span key={`${t.key}:${t.value}`} className="inline-flex items-center gap-1 text-xs font-mono px-2 py-0.5 rounded bg-primary/10 text-primary/80">
+              <span key={`${t.key}:${t.value}`} className="inline-flex items-center gap-0.5 font-mono px-1.5 py-0 rounded bg-primary/10 text-primary/80">
                 {t.key}:{t.value}
                 <button onClick={() => handleRemoveTag(t.key, t.value)} className="hover:text-destructive">
-                  <X className="h-3 w-3" />
+                  <X className="h-2.5 w-2.5" />
                 </button>
               </span>
             ))}
-            <form onSubmit={e => { e.preventDefault(); handleAddTag() }} className="inline-flex items-center gap-1">
+            <form onSubmit={e => { e.preventDefault(); handleAddTag() }} className="inline-flex items-center gap-0.5">
               <Input
                 value={tagInput}
                 onChange={e => setTagInput(e.target.value)}
                 placeholder="key:value"
-                className="h-6 w-28 text-xs px-2 py-0"
+                className="h-5 w-20 text-xs px-1.5 py-0"
               />
               <button type="submit" disabled={!tagInput.includes(':')} className="text-muted-foreground hover:text-foreground disabled:opacity-30">
-                <Plus className="h-3.5 w-3.5" />
+                <Plus className="h-3 w-3" />
               </button>
             </form>
           </div>
@@ -281,38 +324,195 @@ export default function IssueDetail() {
               </Button>
             </a>
           )}
+          <Button
+            size="sm"
+            variant={followed ? 'default' : 'outline'}
+            onClick={async () => {
+              if (!projectId || !issueId) return
+              if (followed) {
+                await api.unfollowIssue(projectId, issueId)
+                setFollowed(false)
+                const updated = await api.getIssue(projectId, issueId)
+                setFollowers(updated.followers || [])
+                toast.success('Unfollowed')
+              } else {
+                await api.followIssue(projectId, issueId)
+                setFollowed(true)
+                const updated = await api.getIssue(projectId, issueId)
+                setFollowers(updated.followers || [])
+                toast.success('Following')
+              }
+            }}
+          >
+            <Bookmark className={cn("h-4 w-4 mr-1", followed && "fill-current")} /> {followed ? 'Following' : 'Follow'}
+          </Button>
           <Button size="sm" variant="outline" className="text-destructive hover:bg-destructive/10" onClick={() => setShowDelete(true)}>
             <Trash2 className="h-4 w-4" />
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3 mb-6">
-        <Card className="animate-slide-up stagger-1">
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">First Seen</CardTitle></CardHeader>
-          <CardContent><p className="text-sm font-mono">{new Date(issue.first_seen).toLocaleString()}</p></CardContent>
-        </Card>
-        <Card className="animate-slide-up stagger-2">
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Last Seen</CardTitle></CardHeader>
-          <CardContent><p className="text-sm font-mono">{new Date(issue.last_seen).toLocaleString()}</p></CardContent>
-        </Card>
-        <Card className="animate-slide-up stagger-3">
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Assigned To</CardTitle></CardHeader>
-          <CardContent>
-            <Select
-              value={issue.assigned_to || ''}
-              onChange={e => handleAssign(e.target.value)}
-              className="h-9 text-sm"
-            >
-              <option value="">Unassigned</option>
-              {users.map(u => (
-                <option key={u.id} value={u.id}>{u.name || u.email}</option>
-              ))}
-            </Select>
-          </CardContent>
-        </Card>
+
+      {/* Last Event (always expanded) */}
+      {events.length > 0 && (
+        <>
+          <h2 className="text-lg font-semibold mb-4">Last Event</h2>
+          <div className="border border-border/60 rounded-lg overflow-hidden mb-8">
+            <div className="flex items-start justify-between p-4">
+              <div>
+                <p className="font-medium text-sm">{events[0].message}</p>
+                <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                  {new Date(events[0].timestamp).toLocaleString()}
+                  {events[0].environment && <span className="ml-2 text-muted-foreground/70">{events[0].environment}</span>}
+                  {events[0].release && <span className="ml-2 text-muted-foreground/70">{events[0].release}</span>}
+                  {events[0].server_name && <span className="ml-2 text-muted-foreground/70">{events[0].server_name}</span>}
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0 ml-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(formatEventSummary(events[0].data))
+                    toast.success('Summary copied')
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5 mr-1" /> Copy summary
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(events[0].data, null, 2))
+                    toast.success('Full event copied')
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5 mr-1" /> Copy full
+                </Button>
+              </div>
+            </div>
+            <div className="px-4 pb-4">
+              <EventData data={events[0].data} />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Comments */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <MessageSquare className="h-5 w-5" />
+          Comments
+          {comments.length > 0 && <span className="text-sm font-normal text-muted-foreground">({comments.length})</span>}
+        </h2>
+
+        {comments.map(c => (
+          <div key={c.id} className="flex gap-3 mb-4">
+            <div className="shrink-0 mt-0.5">
+              {c.user_avatar ? (
+                <img src={c.user_avatar} alt="" className="h-7 w-7 rounded-full" />
+              ) : (
+                <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium text-primary">
+                  {(c.user_name || c.user_email)[0]?.toUpperCase()}
+                </div>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-sm font-medium">{c.user_name || c.user_email}</span>
+                <span className="text-xs text-muted-foreground">{new Date(c.created_at).toLocaleString()}</span>
+                {c.updated_at !== c.created_at && (
+                  <span className="text-xs text-muted-foreground italic">(edited)</span>
+                )}
+              </div>
+              {editingComment === c.id ? (
+                <div className="flex gap-2">
+                  <textarea
+                    value={editBody}
+                    onChange={e => setEditBody(e.target.value)}
+                    className="flex-1 text-sm rounded-md border border-border bg-background px-3 py-2 min-h-[60px] resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <div className="flex flex-col gap-1">
+                    <Button size="sm" disabled={!editBody.trim()} onClick={async () => {
+                      if (!projectId || !issueId) return
+                      const updated = await api.updateComment(projectId, issueId, c.id, editBody.trim())
+                      setComments(prev => prev.map(x => x.id === c.id ? { ...x, body: updated.body, updated_at: updated.updated_at } : x))
+                      setEditingComment(null)
+                      toast.success('Comment updated')
+                    }}>
+                      <Check className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditingComment(null)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm whitespace-pre-wrap">{c.body}</p>
+              )}
+              {editingComment !== c.id && (currentUser?.id === c.user_id || currentUser?.role === 'admin') && (
+                <div className="flex gap-2 mt-1">
+                  <button
+                    onClick={() => { setEditingComment(c.id); setEditBody(c.body) }}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Pencil className="h-3 w-3 inline mr-0.5" /> Edit
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!projectId || !issueId) return
+                      await api.deleteComment(projectId, issueId, c.id)
+                      setComments(prev => prev.filter(x => x.id !== c.id))
+                      toast.success('Comment deleted')
+                    }}
+                    className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    <Trash2 className="h-3 w-3 inline mr-0.5" /> Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+
+        <form
+          onSubmit={async e => {
+            e.preventDefault()
+            if (!projectId || !issueId || !commentBody.trim() || submittingComment) return
+            setSubmittingComment(true)
+            try {
+              const created = await api.createComment(projectId, issueId, commentBody.trim())
+              setComments(prev => [...prev, created])
+              setCommentBody('')
+              toast.success('Comment added')
+            } finally {
+              setSubmittingComment(false)
+            }
+          }}
+          className="flex gap-2 items-start"
+        >
+          <div className="shrink-0 mt-0.5">
+            {currentUser?.avatar_url ? (
+              <img src={currentUser.avatar_url} alt="" className="h-7 w-7 rounded-full" />
+            ) : (
+              <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium text-primary">
+                {(currentUser?.name || currentUser?.email || '?')[0]?.toUpperCase()}
+              </div>
+            )}
+          </div>
+          <textarea
+            value={commentBody}
+            onChange={e => setCommentBody(e.target.value)}
+            placeholder="Add a comment..."
+            className="flex-1 text-sm rounded-md border border-border bg-background px-3 py-2 min-h-[60px] resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50"
+          />
+          <Button type="submit" size="sm" disabled={!commentBody.trim() || submittingComment} className="mt-0.5">
+            <Send className="h-4 w-4" />
+          </Button>
+        </form>
       </div>
 
+      {/* All Events */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">
           Events <span className="text-muted-foreground font-mono text-sm ml-1">({eventTotal})</span>
@@ -815,6 +1015,7 @@ function formatEventSummary(data: Record<string, unknown>): string {
 }
 
 function EventData({ data }: { data: Record<string, unknown> }) {
+  const [activeTab, setActiveTab] = useState('')
   const exception = data.exception as { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<{ filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }> } }> } | undefined
   const request = data.request as { method?: string; url?: string; headers?: Record<string, string>; query_string?: string; data?: unknown; env?: Record<string, string> } | undefined
   const breadcrumbs = data.breadcrumbs as { values?: Array<{ type?: string; category?: string; message?: string; data?: Record<string, unknown>; level?: string; timestamp?: string | number }> } | undefined
@@ -822,9 +1023,21 @@ function EventData({ data }: { data: Record<string, unknown> }) {
   const contexts = data.contexts as Record<string, Record<string, unknown>> | undefined
   const user = data.user as { id?: string; email?: string; username?: string; ip_address?: string; [key: string]: unknown } | undefined
 
-  const hasStructured = exception?.values || request || breadcrumbs?.values?.length || tags || contexts || user
+  const tabs: { id: string; label: string; count?: number }[] = []
+  if (exception?.values?.length) tabs.push({ id: 'stacktrace', label: 'Stacktrace' })
+  if (request) tabs.push({ id: 'request', label: 'Request' })
+  if (user && Object.values(user).some(v => v != null && v !== '')) tabs.push({ id: 'user', label: 'User' })
+  if (contexts && Object.entries(contexts).some(([, v]) => v && typeof v === 'object' && Object.keys(v).length > 0)) tabs.push({ id: 'context', label: 'Context' })
+  if (breadcrumbs?.values?.length) tabs.push({ id: 'breadcrumbs', label: 'Breadcrumbs', count: breadcrumbs.values.length })
+  if (tags) {
+    const tagEntries = Array.isArray(tags) ? tags : Object.entries(tags)
+    if (tagEntries.length) tabs.push({ id: 'tags', label: 'Tags', count: tagEntries.length })
+  }
+  tabs.push({ id: 'raw', label: 'JSON' })
 
-  if (!hasStructured) {
+  const current = activeTab || tabs[0]?.id || 'raw'
+
+  if (tabs.length === 1) {
     return (
       <pre className="bg-[#0d1117] rounded-lg p-4 text-xs font-mono overflow-x-auto max-h-96 text-foreground/80 border border-border/60">
         {JSON.stringify(data, null, 2)}
@@ -833,13 +1046,35 @@ function EventData({ data }: { data: Record<string, unknown> }) {
   }
 
   return (
-    <div className="space-y-5">
-      {exception && <ExceptionSection exception={exception} />}
-      {request && <RequestSection request={request} />}
-      {breadcrumbs?.values && breadcrumbs.values.length > 0 && <BreadcrumbsSection breadcrumbs={breadcrumbs} />}
-      {tags && <TagsSection tags={tags} />}
-      {contexts && <ContextsSection contexts={contexts} />}
-      {user && <UserSection user={user} />}
+    <div>
+      <div className="flex gap-0 border-b border-border/60 mb-4">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              'px-3 py-2 text-xs font-medium border-b-2 transition-colors -mb-px',
+              current === tab.id
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground/80'
+            )}
+          >
+            {tab.label}
+            {tab.count !== undefined && <span className="ml-1 text-muted-foreground/60">({tab.count})</span>}
+          </button>
+        ))}
+      </div>
+      {current === 'stacktrace' && exception && <ExceptionSection exception={exception} />}
+      {current === 'request' && request && <RequestSection request={request} />}
+      {current === 'user' && user && <UserSection user={user} />}
+      {current === 'context' && contexts && <ContextsSection contexts={contexts} />}
+      {current === 'breadcrumbs' && breadcrumbs && <BreadcrumbsSection breadcrumbs={breadcrumbs} />}
+      {current === 'tags' && tags && <TagsSection tags={tags} />}
+      {current === 'raw' && (
+        <pre className="bg-[#0d1117] rounded-lg p-4 text-xs font-mono overflow-x-auto max-h-96 text-foreground/80 border border-border/60">
+          {JSON.stringify(data, null, 2)}
+        </pre>
+      )}
     </div>
   )
 }

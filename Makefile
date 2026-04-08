@@ -1,4 +1,21 @@
-.PHONY: dev build run migrate sqlc frontend docker clean admin remote-admin
+.PHONY: dev build run migrate sqlc frontend docker clean admin remote-admin local-db local-db-down local-dev
+
+# Local PostgreSQL for development
+local-db:
+	docker compose -f docker-compose.local.yml up -d
+
+local-db-down:
+	docker compose -f docker-compose.local.yml down
+
+# Development with local auth (starts DB, builds backend, starts both)
+local-dev: local-db
+	@echo "Waiting for PostgreSQL..."
+	@until docker compose -f docker-compose.local.yml exec db pg_isready -U gosnag > /dev/null 2>&1; do sleep 0.5; done
+	@echo "Building backend..."
+	@go build -o gosnag ./cmd/gosnag
+	@echo "Starting backend + frontend..."
+	@DATABASE_URL="postgres://gosnag:gosnag@localhost:5432/gosnag?sslmode=disable" AUTH_MODE=local PORT=8099 BASE_URL=http://localhost:8099 ./gosnag &
+	@cd web && GOSNAG_PORT=8099 VITE_PORT=5200 npm run dev
 
 # Development: run backend + frontend with hot reload
 dev:
@@ -75,6 +92,11 @@ staging-admin:
 	docker compose -f docker-compose.staging.yml exec db psql -U gosnag -c \
 		"SET search_path TO gosnag, public; INSERT INTO users (id, email, name, role, created_at, updated_at) VALUES (gen_random_uuid(), '$(EMAIL)', '$(EMAIL)', 'admin', now(), now()) ON CONFLICT (email) DO UPDATE SET role = 'admin', updated_at = now();"
 	@echo "$(EMAIL) is now admin on staging"
+
+# Seed local project with sample events: make local-seed DSN=http://key@localhost:8099/5
+local-seed:
+	@test -n "$(DSN)" || (echo "Usage: make local-seed DSN=<project-dsn> [COUNT=200]" && exit 1)
+	@./scripts/local-seed.sh "$(DSN)" "$(or $(COUNT),200)"
 
 # Clean build artifacts
 clean:

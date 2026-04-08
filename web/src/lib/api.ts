@@ -82,6 +82,21 @@ export const api = {
     request<Issue>(`/projects/${projectId}/issues/${issueId}`, { method: 'PUT', body: JSON.stringify(data) }),
   assignIssue: (projectId: string, issueId: string, userId: string | null) =>
     request<Issue>(`/projects/${projectId}/issues/${issueId}/assign`, { method: 'PUT', body: JSON.stringify({ assigned_to: userId }) }),
+  followIssue: (projectId: string, issueId: string) =>
+    request<{ followed: boolean }>(`/projects/${projectId}/issues/${issueId}/follow`, { method: 'POST' }),
+  unfollowIssue: (projectId: string, issueId: string) =>
+    request<{ followed: boolean }>(`/projects/${projectId}/issues/${issueId}/follow`, { method: 'DELETE' }),
+
+  // Comments
+  listComments: (projectId: string, issueId: string) =>
+    request<IssueComment[]>(`/projects/${projectId}/issues/${issueId}/comments`),
+  createComment: (projectId: string, issueId: string, body: string) =>
+    request<IssueComment>(`/projects/${projectId}/issues/${issueId}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
+  updateComment: (projectId: string, issueId: string, commentId: string, body: string) =>
+    request<IssueComment>(`/projects/${projectId}/issues/${issueId}/comments/${commentId}`, { method: 'PUT', body: JSON.stringify({ body }) }),
+  deleteComment: (projectId: string, issueId: string, commentId: string) =>
+    request<void>(`/projects/${projectId}/issues/${issueId}/comments/${commentId}`, { method: 'DELETE' }),
+
   listEvents: (projectId: string, issueId: string, params?: { limit?: number; offset?: number }) => {
     const q = new URLSearchParams()
     if (params?.limit) q.set('limit', String(params.limit))
@@ -234,6 +249,8 @@ export interface Issue {
   jira_ticket_url: string | null
   priority: number
   culprit: string
+  followed?: boolean
+  followers?: { id: string; name: string; email: string }[]
   tags?: IssueTag[]
   user_count?: number
   trend?: number[]
@@ -290,6 +307,18 @@ export interface APIToken {
 export interface IssueTag {
   key: string
   value: string
+}
+
+export interface IssueComment {
+  id: string
+  issue_id: string
+  user_id: string
+  user_name: string
+  user_email: string
+  user_avatar: string
+  body: string
+  created_at: string
+  updated_at: string
 }
 
 export interface TagRule {

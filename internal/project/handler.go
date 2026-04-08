@@ -155,6 +155,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.cache.Invalidate()
 	dsn := buildDSN(r, key.PublicKey, project.NumericID)
 	legacyDSN := buildLegacyDSN(r, key.PublicKey, project.ID)
 	writeJSON(w, http.StatusCreated, ProjectResponse{SafeProject: toSafeProject(project), DSN: dsn, LegacyDSN: legacyDSN})
@@ -343,6 +344,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		project.GroupID = groupID
 	}
 
+	h.cache.Invalidate()
 	writeJSON(w, http.StatusOK, toSafeProject(project))
 }
 
@@ -358,6 +360,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.cache.Invalidate()
 	w.WriteHeader(http.StatusNoContent)
 }
 

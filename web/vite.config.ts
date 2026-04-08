@@ -11,8 +11,9 @@ export default defineConfig({
     },
   },
   server: {
+    port: Number(process.env.VITE_PORT) || 5173,
     proxy: {
-      '/api': 'http://localhost:8080',
+      '/api': `http://localhost:${process.env.GOSNAG_PORT || '8080'}`,
     },
   },
 })

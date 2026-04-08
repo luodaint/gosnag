@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { ChevronLeft, ChevronRight, ChevronDown, Settings, Trash2, Filter, Search, List, AlignLeft } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, Settings, Trash2, Filter, Search, List, AlignLeft, Bookmark } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
 import { IssueListSkeleton } from '@/components/ui/skeleton'
@@ -503,6 +503,9 @@ export default function IssueList() {
                     {displayMode === 'classic' ? (
                       <>
                         <div className="flex items-center gap-2 mb-1">
+                          {issue.followed && (
+                            <Bookmark className="h-3.5 w-3.5 text-primary fill-primary shrink-0" />
+                          )}
                           <Badge variant={LEVEL_COLORS[issue.level] || 'outline'} className="text-xs">
                             {issue.level}
                           </Badge>
@@ -734,29 +737,24 @@ function parseIssueTitle(title: string): { exceptionType: string; message: strin
 
 function DetailedIssueRow({ issue, fetchedAt }: { issue: Issue; fetchedAt: number | null }) {
   const { exceptionType, message } = parseIssueTitle(issue.title)
-  const statusBadge = issue.status !== 'open' ? (
-    <Badge variant={STATUS_COLORS[issue.status] || 'outline'} className="text-[10px] ml-2">
-      {issue.status}
-    </Badge>
-  ) : null
 
   return (
     <>
       <div className="flex items-center gap-1.5 min-w-0">
-        {exceptionType ? (
-          <>
-            <span className="font-semibold text-sm truncate shrink-0">{exceptionType}</span>
-            {issue.culprit && (
-              <>
-                <span className="text-muted-foreground/40 shrink-0">&middot;</span>
-                <span className="text-sm text-muted-foreground truncate">{issue.culprit}</span>
-              </>
-            )}
-          </>
-        ) : (
-          <span className="font-semibold text-sm truncate">{issue.title}</span>
+        {issue.followed && (
+          <Bookmark className="h-3 w-3 text-primary fill-primary shrink-0" />
         )}
-        {statusBadge}
+        <Badge variant={LEVEL_COLORS[issue.level] || 'outline'} className="text-[10px] shrink-0">
+          {issue.level}
+        </Badge>
+        <Badge variant={STATUS_COLORS[issue.status] || 'outline'} className="text-[10px] shrink-0">
+          {issue.status}
+        </Badge>
+        {issue.culprit ? (
+          <span className="font-semibold text-sm truncate">{issue.culprit}</span>
+        ) : !exceptionType ? (
+          <span className="font-semibold text-sm truncate">{issue.title}</span>
+        ) : null}
         {issue.priority !== 50 && (
           <span className={cn(
             'text-[10px] font-mono px-1 py-0.5 rounded shrink-0',
@@ -769,8 +767,10 @@ function DetailedIssueRow({ issue, fetchedAt }: { issue: Issue; fetchedAt: numbe
           </span>
         )}
       </div>
-      {exceptionType && message && (
-        <p className="text-sm text-muted-foreground truncate mt-0.5">{message}</p>
+      {exceptionType && (
+        <p className="text-sm text-muted-foreground truncate mt-0.5">
+          {exceptionType}{message && <> - {message}</>}
+        </p>
       )}
       {issue.tags && issue.tags.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-0.5">
