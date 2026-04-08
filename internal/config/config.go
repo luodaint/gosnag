@@ -13,6 +13,9 @@ type Config struct {
 	DatabaseURL string
 	LogLevel    slog.Level
 
+	// Auth mode: "google" (default) or "local" (no OAuth, email-only login)
+	AuthMode string
+
 	// Google OAuth (client ID only — GIS flow verifies tokens server-side)
 	GoogleClientID string
 
@@ -52,11 +55,17 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
 
+	authMode := getEnv("AUTH_MODE", "google")
+	if authMode != "local" && authMode != "google" {
+		authMode = "google"
+	}
+
 	return &Config{
 		Port:        port,
 		DatabaseURL: dbURL,
 		LogLevel:    parseLogLevel(getEnv("LOG_LEVEL", "info")),
 
+		AuthMode:       authMode,
 		GoogleClientID: getEnv("GOOGLE_CLIENT_ID", ""),
 
 		SMTPHost:     getEnv("SMTP_HOST", ""),

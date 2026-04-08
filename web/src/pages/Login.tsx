@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import { Bug } from 'lucide-react'
 import { api } from '@/lib/api'
 
@@ -33,6 +35,9 @@ export default function Login() {
   const buttonRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [authMode, setAuthMode] = useState<'google' | 'local'>('google')
+  const [email, setEmail] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -41,7 +46,15 @@ export default function Login() {
       try {
         const config = await api.getAuthConfig()
 
-        // Wait for GIS script to load
+        if (cancelled) return
+
+        if (config.auth_mode === 'local') {
+          setAuthMode('local')
+          setLoading(false)
+          return
+        }
+
+        // Google OAuth flow
         const waitForGoogle = () =>
           new Promise<void>((resolve) => {
             if (window.google?.accounts) {
@@ -95,6 +108,21 @@ export default function Login() {
     return () => { cancelled = true }
   }, [])
 
+  const handleLocalLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email.trim()) return
+    setSubmitting(true)
+    setError('')
+    try {
+      await api.localLogin(email.trim())
+      window.location.href = '/'
+    } catch {
+      setError('Login failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
       <div className="absolute inset-0 bg-background" />
@@ -120,15 +148,33 @@ export default function Login() {
           <CardDescription>Self-hosted error tracking</CardDescription>
         </CardHeader>
         <CardContent className="pt-4 flex flex-col items-center">
-          {loading && !error && (
-            <div className="h-[44px] w-[320px] rounded bg-muted/30 animate-pulse" />
+          {authMode === 'local' ? (
+            <form onSubmit={handleLocalLogin} className="w-full space-y-3">
+              <Input
+                type="email"
+                placeholder="Email address"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                autoFocus
+                required
+              />
+              <Button type="submit" className="w-full" disabled={submitting}>
+                {submitting ? 'Signing in...' : 'Sign in'}
+              </Button>
+            </form>
+          ) : (
+            <>
+              {loading && !error && (
+                <div className="h-[44px] w-[320px] rounded bg-muted/30 animate-pulse" />
+              )}
+              <div ref={buttonRef} />
+            </>
           )}
-          <div ref={buttonRef} />
           {error && (
             <p className="text-sm text-destructive mt-3">{error}</p>
           )}
           <p className="text-xs text-center text-muted-foreground mt-4">
-            Secure authentication via Google
+            {authMode === 'local' ? 'Local development mode' : 'Secure authentication via Google'}
           </p>
         </CardContent>
       </Card>

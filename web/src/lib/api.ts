@@ -23,9 +23,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   me: () => request<User>('/me'),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
-  getAuthConfig: () => request<{ google_client_id: string }>('/auth/config'),
+  getAuthConfig: () => request<{ auth_mode: string; google_client_id: string }>('/auth/config'),
   googleLogin: (credential: string) =>
     request<User>('/auth/google/token', { method: 'POST', body: JSON.stringify({ credential }) }),
+  localLogin: (email: string) =>
+    request<User>('/auth/local/login', { method: 'POST', body: JSON.stringify({ email }) }),
 
   // Groups
   listGroups: () => request<ProjectGroup[]>('/groups'),

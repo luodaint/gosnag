@@ -15,6 +15,7 @@ type OAuthHandler struct {
 	queries    *db.Queries
 	clientID   string
 	baseURL    string
+	authMode   string
 	sessionTTL time.Duration
 	httpClient *http.Client
 }
@@ -24,6 +25,7 @@ func NewOAuthHandler(queries *db.Queries, cfg *config.Config) *OAuthHandler {
 		queries:    queries,
 		clientID:   cfg.GoogleClientID,
 		baseURL:    cfg.BaseURL,
+		authMode:   cfg.AuthMode,
 		sessionTTL: 7 * 24 * time.Hour, // 7 days
 		httpClient: &http.Client{Timeout: 5 * time.Second},
 	}
@@ -38,15 +40,11 @@ type GoogleTokenInfo struct {
 	Aud           string `json:"aud"`
 }
 
-// AuthConfig returns the Google client ID for the frontend GIS integration.
+// AuthConfig returns the auth configuration for the frontend.
 func (h *OAuthHandler) AuthConfig(w http.ResponseWriter, r *http.Request) {
-	if h.clientID == "" {
-		http.Error(w, `{"error":"google auth not configured"}`, http.StatusServiceUnavailable)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
+		"auth_mode":        h.authMode,
 		"google_client_id": h.clientID,
 	})
 }
@@ -186,6 +184,81 @@ func (h *OAuthHandler) TokenLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set session cookie
+	http.SetCookie(w, sessionCookie(r, h.baseURL, sessionToken, int(h.sessionTTL.Seconds())))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+// LocalLogin handles email-only login for local/staging development.
+// No password required — just provide an email. First user becomes admin.
+func (h *OAuthHandler) LocalLogin(w http.ResponseWriter, r *http.Request) {
+	if h.authMode != "local" {
+		http.Error(w, `{"error":"local auth not enabled"}`, http.StatusForbidden)
+		return
+	}
+
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" {
+		http.Error(w, `{"error":"email is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	userCount, _ := h.queries.CountUsers(r.Context())
+
+	var user db.User
+	var err error
+
+	if userCount == 0 {
+		// First user: auto-create as admin
+		user, err = h.queries.UpsertUserByGoogle(r.Context(), db.UpsertUserByGoogleParams{
+			Email: body.Email,
+			Name:  body.Email,
+		})
+		if err != nil {
+			http.Error(w, `{"error":"failed to create user"}`, http.StatusInternalServerError)
+			return
+		}
+		user, _ = h.queries.UpdateUserRole(r.Context(), db.UpdateUserRoleParams{ID: user.ID, Role: "admin"})
+		user, _ = h.queries.UpdateUserStatus(r.Context(), db.UpdateUserStatusParams{ID: user.ID, Status: "active"})
+		slog.Info("local auth: first user created as admin", "email", user.Email)
+	} else {
+		existing, err := h.queries.GetUserByEmail(r.Context(), body.Email)
+		if err != nil {
+			// Auto-create in local mode
+			user, err = h.queries.UpsertUserByGoogle(r.Context(), db.UpsertUserByGoogleParams{
+				Email: body.Email,
+				Name:  body.Email,
+			})
+			if err != nil {
+				http.Error(w, `{"error":"failed to create user"}`, http.StatusInternalServerError)
+				return
+			}
+			user, _ = h.queries.UpdateUserRole(r.Context(), db.UpdateUserRoleParams{ID: user.ID, Role: "admin"})
+			user, _ = h.queries.UpdateUserStatus(r.Context(), db.UpdateUserStatusParams{ID: user.ID, Status: "active"})
+			slog.Info("local auth: user auto-created as admin", "email", user.Email)
+		} else {
+			user = existing
+		}
+	}
+
+	if user.Status != "active" {
+		user, _ = h.queries.UpdateUserStatus(r.Context(), db.UpdateUserStatusParams{ID: user.ID, Status: "active"})
+	}
+
+	sessionToken := generateToken(32)
+	_, err = h.queries.CreateSession(r.Context(), db.CreateSessionParams{
+		Token:     sessionToken,
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(h.sessionTTL),
+	})
+	if err != nil {
+		http.Error(w, `{"error":"failed to create session"}`, http.StatusInternalServerError)
+		return
+	}
+
 	http.SetCookie(w, sessionCookie(r, h.baseURL, sessionToken, int(h.sessionTTL.Seconds())))
 
 	w.Header().Set("Content-Type", "application/json")

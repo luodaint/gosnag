@@ -105,6 +105,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	r.Route("/api/v1/auth", func(r chi.Router) {
 		r.Get("/config", oauthHandler.AuthConfig)
 		r.Post("/google/token", oauthHandler.TokenLogin)
+		r.Post("/local/login", oauthHandler.LocalLogin)
 		r.Post("/logout", oauthHandler.Logout)
 	})
 
