@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { api, type Project, type ProjectGroup } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,9 @@ import { Plus, FolderOpen, TrendingUp, TrendingDown, Minus, X, Pencil, Star, Gri
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
 import { IconPicker, resolveIcon, PROJECT_COLORS } from '@/components/ui/icon-picker'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, useSortable, rectSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 function hashColor(name: string) {
   let hash = 0
@@ -48,10 +51,10 @@ export default function Projects() {
   const [loading, setLoading] = useState(true)
   const isAdmin = user?.role === 'admin'
 
-  // Drag state
-  const dragItem = useRef<string | null>(null)
-  const dragOverItem = useRef<string | null>(null)
-  const [dragId, setDragId] = useState<string | null>(null)
+  // dnd-kit sensors: require 8px movement before activating (avoids conflicts with clicks)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  )
 
   useEffect(() => {
     Promise.all([
@@ -78,12 +81,7 @@ export default function Projects() {
   const filteredProjects = (activeGroup
     ? projects.filter(p => p.group_id === activeGroup)
     : projects
-  ).sort((a, b) => {
-    const aFav = favoriteIds.has(a.id) ? 0 : 1
-    const bFav = favoriteIds.has(b.id) ? 0 : 1
-    if (aFav !== bFav) return aFav - bFav
-    return (a.position ?? 0) - (b.position ?? 0)
-  })
+  ).sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
 
   const handleIconColorChange = async (projectId: string, icon: string, color: string) => {
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, icon, color } : p))
@@ -95,41 +93,25 @@ export default function Projects() {
     }
   }
 
-  // Drag & drop handlers
-  const handleDragStart = (id: string) => {
-    dragItem.current = id
-    setDragId(id)
-  }
-
-  const handleDragEnter = (id: string) => {
-    dragOverItem.current = id
-  }
-
-  const handleDragEnd = async () => {
-    setDragId(null)
-    if (!dragItem.current || !dragOverItem.current || dragItem.current === dragOverItem.current) return
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
 
     const items = [...filteredProjects]
-    const fromIdx = items.findIndex(p => p.id === dragItem.current)
-    const toIdx = items.findIndex(p => p.id === dragOverItem.current)
+    const fromIdx = items.findIndex(p => p.id === active.id)
+    const toIdx = items.findIndex(p => p.id === over.id)
     if (fromIdx < 0 || toIdx < 0) return
 
     const [moved] = items.splice(fromIdx, 1)
     items.splice(toIdx, 0, moved)
 
-    // Update positions
     const reorder = items.map((p, i) => ({ id: p.id, position: i }))
-    setProjects(prev => {
-      const updated = [...prev]
-      for (const r of reorder) {
-        const idx = updated.findIndex(p => p.id === r.id)
-        if (idx >= 0) updated[idx] = { ...updated[idx], position: r.position }
-      }
-      return updated
-    })
 
-    dragItem.current = null
-    dragOverItem.current = null
+    // Optimistic update
+    setProjects(prev => prev.map(p => {
+      const r = reorder.find(x => x.id === p.id)
+      return r ? { ...p, position: r.position } : p
+    }))
 
     try {
       await api.reorderProjects(reorder)
@@ -270,113 +252,22 @@ export default function Projects() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 auto-rows-fr">
-          {filteredProjects.map(p => {
-            const thisWeek = p.errors_this_week ?? 0
-            const lastWeek = p.errors_last_week ?? 0
-            const diff = thisWeek - lastWeek
-            const trend = p.trend ?? []
-            const cardColor = p.color || hashColor(p.name)
-
-            return (
-              <div
-                key={p.id}
-                draggable={isAdmin}
-                onDragStart={() => handleDragStart(p.id)}
-                onDragEnter={() => handleDragEnter(p.id)}
-                onDragEnd={handleDragEnd}
-                onDragOver={(e) => e.preventDefault()}
-                className={cn(
-                  'transition-opacity',
-                  dragId === p.id && 'opacity-40'
-                )}
-              >
-                <Link to={`/projects/${p.id}`}>
-                  <Card className="h-full flex flex-col transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:border-border/80 overflow-hidden">
-                    <div className="h-1" style={{ backgroundColor: cardColor }} />
-                    <CardHeader className="pb-2">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-start gap-2">
-                          {isAdmin ? (
-                            <IconPicker
-                              value={p.icon}
-                              color={p.color}
-                              fallbackColor={hashColor(p.name)}
-                              onChange={(icon, color) => handleIconColorChange(p.id, icon, color)}
-                            />
-                          ) : p.icon ? (
-                            <span className="flex items-center justify-center h-8 w-8">
-                              {resolveIcon(p.icon)}
-                            </span>
-                          ) : null}
-                          <div>
-                            <CardTitle className="text-lg">{p.name}</CardTitle>
-                            <p className="text-sm text-muted-foreground font-mono">{p.slug}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-0.5">
-                          {isAdmin && (
-                            <span className="p-1 text-muted-foreground/20 cursor-grab active:cursor-grabbing">
-                              <GripVertical className="h-3.5 w-3.5" />
-                            </span>
-                          )}
-                          <button
-                            onClick={(e) => toggleFavorite(p.id, e)}
-                            className="p-1 -mr-1 transition-colors"
-                          >
-                            <Star
-                              className={cn(
-                                'h-4 w-4',
-                                favoriteIds.has(p.id)
-                                  ? 'fill-amber-400 text-amber-400'
-                                  : 'text-muted-foreground/30 hover:text-muted-foreground'
-                              )}
-                            />
-                          </button>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pt-0 space-y-3 flex-1 flex flex-col">
-                      {/* Sparkline */}
-                      <div className="h-10">
-                        <ProjectSparkline data={trend} color={cardColor} />
-                      </div>
-
-                      {/* Stats row */}
-                      <div className="grid grid-cols-2 gap-3 pt-1 border-t border-border/40 mt-auto">
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-0.5">Latest Release</p>
-                          <p className="text-sm font-mono truncate">{p.latest_release || '-'}</p>
-                          {p.latest_event && (
-                            <p className="text-[10px] text-muted-foreground/50">{formatRelative(p.latest_event)}</p>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-0.5">Errors to review</p>
-                          <p className="text-2xl font-semibold font-mono leading-tight">{p.open_issues ?? 0}</p>
-                          {(thisWeek > 0 || lastWeek > 0) && (
-                            <p className="text-[10px] text-muted-foreground/50 flex items-center justify-end gap-0.5">
-                              {diff > 0 ? (
-                                <TrendingUp className="h-2.5 w-2.5 text-red-400" />
-                              ) : diff < 0 ? (
-                                <TrendingDown className="h-2.5 w-2.5 text-emerald-400" />
-                              ) : (
-                                <Minus className="h-2.5 w-2.5 text-muted-foreground/40" />
-                              )}
-                              <span className={diff > 0 ? 'text-red-400' : diff < 0 ? 'text-emerald-400' : ''}>
-                                {Math.abs(diff)} last 7d
-                              </span>
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              </div>
-            )
-          })}
-        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={filteredProjects.map(p => p.id)} strategy={rectSortingStrategy}>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 auto-rows-fr">
+              {filteredProjects.map(p => (
+                <SortableProjectCard
+                  key={p.id}
+                  project={p}
+                  isAdmin={isAdmin}
+                  isFavorite={favoriteIds.has(p.id)}
+                  onToggleFavorite={toggleFavorite}
+                  onIconColorChange={handleIconColorChange}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
 
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
@@ -439,6 +330,120 @@ export default function Projects() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function SortableProjectCard({ project: p, isAdmin, isFavorite, onToggleFavorite, onIconColorChange }: {
+  project: Project
+  isAdmin: boolean
+  isFavorite: boolean
+  onToggleFavorite: (id: string, e: React.MouseEvent) => void
+  onIconColorChange: (id: string, icon: string, color: string) => void
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: p.id, disabled: !isAdmin })
+  const navigate = useNavigate()
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  const thisWeek = p.errors_this_week ?? 0
+  const lastWeek = p.errors_last_week ?? 0
+  const diff = thisWeek - lastWeek
+  const trend = p.trend ?? []
+  const cardColor = p.color || hashColor(p.name)
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn('transition-opacity', isDragging && 'opacity-40 z-50')}
+      onClick={() => { if (!isDragging) navigate(`/projects/${p.id}`) }}
+    >
+      <Card className="h-full flex flex-col transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:border-border/80 overflow-hidden">
+        <div className="h-1" style={{ backgroundColor: cardColor }} />
+        <CardHeader className="pb-2">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-2">
+              {isAdmin ? (
+                <IconPicker
+                  value={p.icon}
+                  color={p.color}
+                  fallbackColor={hashColor(p.name)}
+                  onChange={(icon, color) => onIconColorChange(p.id, icon, color)}
+                />
+              ) : p.icon ? (
+                <span className="flex items-center justify-center h-8 w-8">
+                  {resolveIcon(p.icon)}
+                </span>
+              ) : null}
+              <div>
+                <CardTitle className="text-lg">{p.name}</CardTitle>
+                <p className="text-sm text-muted-foreground font-mono">{p.slug}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-0.5">
+              {isAdmin && (
+                <span
+                  ref={setActivatorNodeRef}
+                  {...attributes}
+                  {...listeners}
+                  className="p-1 text-muted-foreground/20 cursor-grab active:cursor-grabbing touch-none"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <GripVertical className="h-3.5 w-3.5" />
+                </span>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleFavorite(p.id, e) }}
+                className="p-1 -mr-1 transition-colors"
+              >
+                <Star
+                  className={cn(
+                    'h-4 w-4',
+                    isFavorite
+                      ? 'fill-amber-400 text-amber-400'
+                      : 'text-muted-foreground/30 hover:text-muted-foreground'
+                  )}
+                />
+              </button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-3 flex-1 flex flex-col">
+          <div className="h-10">
+            <ProjectSparkline data={trend} color={cardColor} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 pt-1 border-t border-border/40 mt-auto">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-0.5">Latest Release</p>
+              <p className="text-sm font-mono truncate">{p.latest_release || '-'}</p>
+              {p.latest_event && (
+                <p className="text-[10px] text-muted-foreground/50">{formatRelative(p.latest_event)}</p>
+              )}
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-0.5">Errors to review</p>
+              <p className="text-2xl font-semibold font-mono leading-tight">{p.open_issues ?? 0}</p>
+              {(thisWeek > 0 || lastWeek > 0) && (
+                <p className="text-[10px] text-muted-foreground/50 flex items-center justify-end gap-0.5">
+                  {diff > 0 ? (
+                    <TrendingUp className="h-2.5 w-2.5 text-red-400" />
+                  ) : diff < 0 ? (
+                    <TrendingDown className="h-2.5 w-2.5 text-emerald-400" />
+                  ) : (
+                    <Minus className="h-2.5 w-2.5 text-muted-foreground/40" />
+                  )}
+                  <span className={diff > 0 ? 'text-red-400' : diff < 0 ? 'text-emerald-400' : ''}>
+                    {Math.abs(diff)} last 7d
+                  </span>
+                </p>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -385,6 +385,7 @@ func (h *Handler) Reorder(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	h.cache.Invalidate()
 	w.WriteHeader(http.StatusNoContent)
 }
 
