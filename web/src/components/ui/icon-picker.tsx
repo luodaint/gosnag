@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import {
   Bug, Shield, Zap, Globe, Server, Database, Code, Terminal, Cpu, Cloud,
   Smartphone, Monitor, Lock, Key, Webhook, Layers, Package, Rocket,
@@ -50,24 +51,14 @@ interface IconPickerProps {
 export function IconPicker({ value, color, fallbackColor, onChange, className }: IconPickerProps) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<'emoji' | 'icons'>('emoji')
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
 
   const activeColor = color || fallbackColor
 
   return (
-    <div ref={ref} className={cn('relative', className)}>
+    <div className={className}>
       <button
         type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o) }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(true) }}
         className={cn(
           'flex items-center justify-center rounded-md transition-colors',
           'h-8 w-8 hover:bg-accent/60',
@@ -79,95 +70,97 @@ export function IconPicker({ value, color, fallbackColor, onChange, className }:
         )}
       </button>
 
-      {open && (
-        <div
-          className="absolute left-0 top-full mt-1 z-50 w-72 rounded-lg border border-border/60 bg-card shadow-xl p-3 space-y-3"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-        >
-          {/* Tabs */}
-          <div className="flex gap-1 border-b border-border/40 pb-2">
-            <button
-              type="button"
-              className={cn('px-2.5 py-1 text-xs rounded-md transition-colors', tab === 'emoji' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-              onClick={() => setTab('emoji')}
-            >Emoji</button>
-            <button
-              type="button"
-              className={cn('px-2.5 py-1 text-xs rounded-md transition-colors', tab === 'icons' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-              onClick={() => setTab('icons')}
-            >Icons</button>
-            {value && (
+      <Dialog open={open} onOpenChange={(v) => { if (!v) setOpen(false) }}>
+        <DialogContent className="max-w-sm" onClick={(e) => e.stopPropagation()}>
+          <DialogTitle>Icon & Color</DialogTitle>
+          <DialogDescription className="sr-only">Choose an icon and color for this project</DialogDescription>
+
+          <div className="space-y-4 mt-2">
+            {/* Tabs */}
+            <div className="flex gap-1 border-b border-border/40 pb-2">
               <button
                 type="button"
-                className="ml-auto px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => { onChange('', color); setOpen(false) }}
-              >Clear</button>
-            )}
-          </div>
-
-          {/* Emoji grid */}
-          {tab === 'emoji' && (
-            <div className="grid grid-cols-10 gap-0.5">
-              {EMOJIS.map(emoji => (
-                <button
-                  key={emoji}
-                  type="button"
-                  className={cn(
-                    'h-7 w-7 flex items-center justify-center rounded text-base hover:bg-accent/60 transition-colors',
-                    value === emoji && 'bg-accent ring-1 ring-primary/40'
-                  )}
-                  onClick={() => { onChange(emoji, color); setOpen(false) }}
-                >{emoji}</button>
-              ))}
-            </div>
-          )}
-
-          {/* Lucide grid */}
-          {tab === 'icons' && (
-            <div className="grid grid-cols-10 gap-0.5">
-              {Object.entries(LUCIDE_ICONS).map(([name, Icon]) => (
-                <button
-                  key={name}
-                  type="button"
-                  className={cn(
-                    'h-7 w-7 flex items-center justify-center rounded hover:bg-accent/60 transition-colors',
-                    value === `lucide:${name}` && 'bg-accent ring-1 ring-primary/40'
-                  )}
-                  onClick={() => { onChange(`lucide:${name}`, color); setOpen(false) }}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Color row */}
-          <div className="border-t border-border/40 pt-2">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-1.5">Color</p>
-            <div className="flex gap-1.5 flex-wrap">
-              {PROJECT_COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  className={cn(
-                    'h-5 w-5 rounded-full transition-all',
-                    activeColor === c ? 'ring-2 ring-offset-2 ring-offset-card scale-110' : 'hover:scale-110'
-                  )}
-                  style={{ backgroundColor: c, ...(activeColor === c ? { ringColor: c } : {}) }}
-                  onClick={() => onChange(value, c)}
-                />
-              ))}
-              {color && (
+                className={cn('px-2.5 py-1 text-xs rounded-md transition-colors', tab === 'emoji' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                onClick={() => setTab('emoji')}
+              >Emoji</button>
+              <button
+                type="button"
+                className={cn('px-2.5 py-1 text-xs rounded-md transition-colors', tab === 'icons' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                onClick={() => setTab('icons')}
+              >Icons</button>
+              {value && (
                 <button
                   type="button"
-                  className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => onChange(value, '')}
-                >Reset</button>
+                  className="ml-auto px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => { onChange('', color); setOpen(false) }}
+                >Clear icon</button>
               )}
             </div>
+
+            {/* Emoji grid */}
+            {tab === 'emoji' && (
+              <div className="grid grid-cols-10 gap-1">
+                {EMOJIS.map(emoji => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className={cn(
+                      'h-8 w-8 flex items-center justify-center rounded text-lg hover:bg-accent/60 transition-colors',
+                      value === emoji && 'bg-accent ring-1 ring-primary/40'
+                    )}
+                    onClick={() => { onChange(emoji, color); setOpen(false) }}
+                  >{emoji}</button>
+                ))}
+              </div>
+            )}
+
+            {/* Lucide grid */}
+            {tab === 'icons' && (
+              <div className="grid grid-cols-10 gap-1">
+                {Object.entries(LUCIDE_ICONS).map(([name, Icon]) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className={cn(
+                      'h-8 w-8 flex items-center justify-center rounded hover:bg-accent/60 transition-colors',
+                      value === `lucide:${name}` && 'bg-accent ring-1 ring-primary/40'
+                    )}
+                    onClick={() => { onChange(`lucide:${name}`, color); setOpen(false) }}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Color row */}
+            <div className="border-t border-border/40 pt-3">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2">Color</p>
+              <div className="flex gap-2 flex-wrap">
+                {PROJECT_COLORS.map(c => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={cn(
+                      'h-6 w-6 rounded-full transition-all',
+                      activeColor === c ? 'ring-2 ring-offset-2 ring-offset-card scale-110' : 'hover:scale-110'
+                    )}
+                    style={{ backgroundColor: c }}
+                    onClick={() => onChange(value, c)}
+                  />
+                ))}
+                {color && (
+                  <button
+                    type="button"
+                    className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => onChange(value, '')}
+                  >Reset</button>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
