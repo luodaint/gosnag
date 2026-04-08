@@ -52,6 +52,30 @@ remote-admin:
 		"sudo docker compose -f /opt/gosnag/docker-compose.yml exec db psql -U gosnag -c \"INSERT INTO users (id, email, name, role, created_at, updated_at) VALUES (gen_random_uuid(), '$(EMAIL)', '$(EMAIL)', 'admin', now(), now()) ON CONFLICT (email) DO UPDATE SET role = 'admin', updated_at = now();\""
 	@echo "✓ $(EMAIL) is now admin on $(HOST)"
 
+# Staging: run with internal PostgreSQL on port 8081
+staging-up:
+	docker compose -f docker-compose.staging.yml up --build -d
+
+staging-down:
+	docker compose -f docker-compose.staging.yml down
+
+staging-logs:
+	docker compose -f docker-compose.staging.yml logs -f gosnag
+
+# Sync production data to staging (requires staging running + prod DB access)
+staging-sync:
+	./scripts/staging-sync.sh
+
+staging-sync-schema:
+	./scripts/staging-sync.sh --schema-only
+
+# Add admin to staging
+staging-admin:
+	@test -n "$(EMAIL)" || (echo "Usage: make staging-admin EMAIL=user@example.com" && exit 1)
+	docker compose -f docker-compose.staging.yml exec db psql -U gosnag -c \
+		"SET search_path TO gosnag, public; INSERT INTO users (id, email, name, role, created_at, updated_at) VALUES (gen_random_uuid(), '$(EMAIL)', '$(EMAIL)', 'admin', now(), now()) ON CONFLICT (email) DO UPDATE SET role = 'admin', updated_at = now();"
+	@echo "$(EMAIL) is now admin on staging"
+
 # Clean build artifacts
 clean:
 	rm -f gosnag
