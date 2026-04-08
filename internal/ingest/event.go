@@ -119,6 +119,33 @@ func (e *SentryEvent) Title() string {
 	return "(no message)"
 }
 
+// Culprit returns a concise location string like "POST /api/v2/bookings".
+func (e *SentryEvent) Culprit() string {
+	// Prefer request method + URL
+	if e.Request != nil {
+		method, _ := e.Request["method"].(string)
+		url, _ := e.Request["url"].(string)
+		if url != "" {
+			// Strip scheme+host to keep just the path
+			if i := strings.Index(url, "://"); i >= 0 {
+				rest := url[i+3:]
+				if j := strings.Index(rest, "/"); j >= 0 {
+					url = rest[j:]
+				}
+			}
+			if method != "" {
+				return strings.ToUpper(method) + " " + url
+			}
+			return url
+		}
+	}
+	// Fall back to transaction (often the route)
+	if e.Transaction != "" {
+		return e.Transaction
+	}
+	return ""
+}
+
 // ComputeFingerprint generates a grouping hash for the event.
 func (e *SentryEvent) ComputeFingerprint() string {
 	// If SDK provides a custom fingerprint, use it directly

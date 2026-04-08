@@ -579,6 +579,7 @@ func issueJSON(i db.Issue) map[string]any {
 		"jira_ticket_key":      nullString(i.JiraTicketKey),
 		"jira_ticket_url":      nullString(i.JiraTicketUrl),
 		"priority":             i.Priority,
+		"culprit":              i.Culprit,
 	}
 	return m
 }

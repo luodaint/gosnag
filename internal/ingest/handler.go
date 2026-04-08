@@ -177,6 +177,7 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 		Level:       issueLevel,
 		Platform:    event.Platform,
 		FirstSeen:   now,
+		Culprit:     event.Culprit(),
 	})
 	if err != nil {
 		slog.Error("failed to upsert issue", "error", err)

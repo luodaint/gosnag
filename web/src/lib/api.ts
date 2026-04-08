@@ -193,6 +193,7 @@ export interface Project {
   jira_api_token_set: boolean
   jira_project_key: string
   jira_issue_type: string
+  issue_display_mode: string
   group_id: string | null
   created_at: string
   total_issues?: number
@@ -230,6 +231,7 @@ export interface Issue {
   jira_ticket_key: string | null
   jira_ticket_url: string | null
   priority: number
+  culprit: string
   tags?: IssueTag[]
   user_count?: number
   trend?: number[]

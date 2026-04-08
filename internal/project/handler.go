@@ -25,16 +25,17 @@ func NewHandler(queries *db.Queries, cache *StatsCache) *Handler {
 }
 
 type CreateProjectRequest struct {
-	Name                   string `json:"name"`
-	Slug                   string `json:"slug"`
-	DefaultCooldownMinutes *int32 `json:"default_cooldown_minutes,omitempty"`
-	WarningAsError         *bool  `json:"warning_as_error,omitempty"`
-	MaxEventsPerIssue      *int32 `json:"max_events_per_issue,omitempty"`
+	Name                   string  `json:"name"`
+	Slug                   string  `json:"slug"`
+	DefaultCooldownMinutes *int32  `json:"default_cooldown_minutes,omitempty"`
+	WarningAsError         *bool   `json:"warning_as_error,omitempty"`
+	MaxEventsPerIssue      *int32  `json:"max_events_per_issue,omitempty"`
 	Icon                   *string `json:"icon,omitempty"`
 	Color                  *string `json:"color,omitempty"`
+	IssueDisplayMode       string  `json:"issue_display_mode"`
 	JiraBaseURL            string  `json:"jira_base_url"`
-	JiraEmail              string `json:"jira_email"`
-	JiraAPIToken           string `json:"jira_api_token"`
+	JiraEmail              string  `json:"jira_email"`
+	JiraAPIToken           string  `json:"jira_api_token"`
 	JiraProjectKey         string  `json:"jira_project_key"`
 	JiraIssueType          string  `json:"jira_issue_type"`
 	GroupID                *string `json:"group_id,omitempty"`
@@ -57,6 +58,7 @@ type SafeProject struct {
 	JiraAPITokenSet        bool      `json:"jira_api_token_set"` // true if configured, never expose the value
 	JiraProjectKey         string    `json:"jira_project_key"`
 	JiraIssueType          string        `json:"jira_issue_type"`
+	IssueDisplayMode       string        `json:"issue_display_mode"`
 	GroupID                *string       `json:"group_id"`
 	CreatedAt              time.Time     `json:"created_at"`
 	UpdatedAt              time.Time     `json:"updated_at"`
@@ -87,6 +89,7 @@ func toSafeProject(p db.Project) SafeProject {
 		JiraAPITokenSet:        p.JiraApiToken != "",
 		JiraProjectKey:         p.JiraProjectKey,
 		JiraIssueType:          p.JiraIssueType,
+		IssueDisplayMode:       p.IssueDisplayMode,
 		GroupID:                nullUUIDToStringPtr(p.GroupID),
 		CreatedAt:              p.CreatedAt,
 		UpdatedAt:              p.UpdatedAt,
@@ -292,6 +295,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		color = *req.Color
 	}
 
+	issueDisplayMode := existing.IssueDisplayMode
+	if req.IssueDisplayMode != "" {
+		issueDisplayMode = req.IssueDisplayMode
+	}
+
 	project, err := h.queries.UpdateProject(r.Context(), db.UpdateProjectParams{
 		ID:                     id,
 		Name:                   name,
@@ -306,6 +314,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		MaxEventsPerIssue:      maxEvents,
 		Icon:                   icon,
 		Color:                  color,
+		IssueDisplayMode:       issueDisplayMode,
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {

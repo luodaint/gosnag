@@ -1,12 +1,13 @@
 -- name: UpsertIssue :one
-INSERT INTO issues (project_id, title, fingerprint, level, platform, first_seen, last_seen, event_count)
-VALUES ($1, $2, $3, $4, $5, $6, $6, 1)
+INSERT INTO issues (project_id, title, fingerprint, level, platform, first_seen, last_seen, event_count, culprit)
+VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7)
 ON CONFLICT (project_id, fingerprint) DO UPDATE
 SET last_seen = $6,
     event_count = issues.event_count + 1,
     title = EXCLUDED.title,
     level = EXCLUDED.level,
     platform = EXCLUDED.platform,
+    culprit = CASE WHEN EXCLUDED.culprit != '' THEN EXCLUDED.culprit ELSE issues.culprit END,
     updated_at = now()
 RETURNING *;
 

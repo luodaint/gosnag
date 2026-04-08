@@ -82,6 +82,7 @@ type Issue struct {
 	JiraTicketKey        sql.NullString `json:"jira_ticket_key"`
 	JiraTicketUrl        sql.NullString `json:"jira_ticket_url"`
 	Priority             int32          `json:"priority"`
+	Culprit              string         `json:"culprit"`
 }
 
 type IssueAlias struct {
@@ -149,6 +150,7 @@ type Project struct {
 	Color                  string        `json:"color"`
 	Position               int32         `json:"position"`
 	NumericID              int32         `json:"numeric_id"`
+	IssueDisplayMode       string        `json:"issue_display_mode"`
 }
 
 type ProjectFavorite struct {

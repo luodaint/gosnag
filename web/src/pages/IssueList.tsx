@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { ChevronLeft, ChevronRight, ChevronDown, Settings, Trash2, Filter, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, Settings, Trash2, Filter, Search, List, AlignLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
 import { IssueListSkeleton } from '@/components/ui/skeleton'
@@ -95,6 +95,9 @@ export default function IssueList() {
   const [searchQuery, setSearchQuery] = useState('')
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const [displayMode, setDisplayMode] = useState<'classic' | 'detailed'>(() => {
+    return (localStorage.getItem('issue-display-mode') as 'classic' | 'detailed') || 'classic'
+  })
 
   const shortcuts = useMemo(() => ({
     '/': (e: KeyboardEvent) => {
@@ -128,7 +131,13 @@ export default function IssueList() {
 
   useEffect(() => {
     if (!projectId) return
-    api.getProject(projectId).then(setProject)
+    api.getProject(projectId).then(p => {
+      setProject(p)
+      // Use project default if user hasn't manually overridden
+      if (!localStorage.getItem('issue-display-mode') && p.issue_display_mode) {
+        setDisplayMode(p.issue_display_mode as 'classic' | 'detailed')
+      }
+    })
   }, [projectId])
 
   useEffect(() => {
@@ -410,6 +419,23 @@ export default function IssueList() {
               <option value="event_count">Events</option>
               <option value="priority">Priority</option>
             </Select>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => {
+                    const next = displayMode === 'classic' ? 'detailed' : 'classic'
+                    setDisplayMode(next)
+                    localStorage.setItem('issue-display-mode', next)
+                  }}
+                >
+                  {displayMode === 'classic' ? <AlignLeft className="h-3.5 w-3.5" /> : <List className="h-3.5 w-3.5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{displayMode === 'classic' ? 'Switch to detailed view' : 'Switch to classic view'}</TooltipContent>
+            </Tooltip>
             <Link to={`/projects/${projectId}/settings`} className="md:hidden">
               <Button variant="outline" size="sm">
                 <Settings className="h-4 w-4" />
@@ -474,51 +500,57 @@ export default function IssueList() {
                     className="flex items-center min-w-0 flex-1"
                   >
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant={LEVEL_COLORS[issue.level] || 'outline'} className="text-xs">
-                        {issue.level}
-                      </Badge>
-                      <Badge variant={STATUS_COLORS[issue.status] || 'outline'} className="text-xs">
-                        {issue.status}
-                      </Badge>
-                      {issue.status === 'resolved' && issue.cooldown_until && (
-                        <span className="text-xs text-muted-foreground font-mono">cooldown until {new Date(issue.cooldown_until).toLocaleString()}</span>
-                      )}
-                      {issue.priority !== 50 && (
-                        <span className={cn(
-                          'text-xs font-mono px-1.5 py-0.5 rounded',
-                          issue.priority > 75 ? 'bg-red-500/15 text-red-400' :
-                          issue.priority > 50 ? 'bg-amber-500/15 text-amber-400' :
-                          issue.priority > 25 ? 'bg-blue-500/15 text-blue-400' :
-                          'bg-muted text-muted-foreground'
-                        )}>
-                          P{issue.priority}
-                        </span>
-                      )}
-                    </div>
-                    <p className="font-medium truncate">{issue.title}</p>
-                    {issue.tags && issue.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-0.5">
-                        {issue.tags.map(t => (
-                          <span key={`${t.key}:${t.value}`} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-primary/10 text-primary/80">
-                            {t.key}:{t.value}
+                    {displayMode === 'classic' ? (
+                      <>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant={LEVEL_COLORS[issue.level] || 'outline'} className="text-xs">
+                            {issue.level}
+                          </Badge>
+                          <Badge variant={STATUS_COLORS[issue.status] || 'outline'} className="text-xs">
+                            {issue.status}
+                          </Badge>
+                          {issue.status === 'resolved' && issue.cooldown_until && (
+                            <span className="text-xs text-muted-foreground font-mono">cooldown until {new Date(issue.cooldown_until).toLocaleString()}</span>
+                          )}
+                          {issue.priority !== 50 && (
+                            <span className={cn(
+                              'text-xs font-mono px-1.5 py-0.5 rounded',
+                              issue.priority > 75 ? 'bg-red-500/15 text-red-400' :
+                              issue.priority > 50 ? 'bg-amber-500/15 text-amber-400' :
+                              issue.priority > 25 ? 'bg-blue-500/15 text-blue-400' :
+                              'bg-muted text-muted-foreground'
+                            )}>
+                              P{issue.priority}
+                            </span>
+                          )}
+                        </div>
+                        <p className="font-medium truncate">{issue.title}</p>
+                        {issue.tags && issue.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {issue.tags.map(t => (
+                              <span key={`${t.key}:${t.value}`} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-primary/10 text-primary/80">
+                                {t.key}:{t.value}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <p className="text-sm text-muted-foreground">
+                          <span className="font-mono text-xs">{issue.platform}</span>
+                          <span className="mx-1.5 opacity-40">&middot;</span>
+                          {fetchedAt ? formatRelativeTime(issue.last_seen, fetchedAt) : new Date(issue.last_seen).toLocaleString()}
+                          <span className="mx-1.5 opacity-40">&middot;</span>
+                          <span className="text-xs">first {fetchedAt ? formatRelativeTime(issue.first_seen, fetchedAt) : new Date(issue.first_seen).toLocaleString()}</span>
+                          <span className="sm:hidden">
+                            <span className="mx-1.5 opacity-40">&middot;</span>
+                            <span className="font-mono text-xs">{issue.event_count} ev</span>
+                            <span className="mx-1.5 opacity-40">&middot;</span>
+                            <span className="font-mono text-xs">{issue.user_count || 0} usr</span>
                           </span>
-                        ))}
-                      </div>
+                        </p>
+                      </>
+                    ) : (
+                      <DetailedIssueRow issue={issue} fetchedAt={fetchedAt} />
                     )}
-                    <p className="text-sm text-muted-foreground">
-                      <span className="font-mono text-xs">{issue.platform}</span>
-                      <span className="mx-1.5 opacity-40">&middot;</span>
-                      {fetchedAt ? formatRelativeTime(issue.last_seen, fetchedAt) : new Date(issue.last_seen).toLocaleString()}
-                      <span className="mx-1.5 opacity-40">&middot;</span>
-                      <span className="text-xs">first {fetchedAt ? formatRelativeTime(issue.first_seen, fetchedAt) : new Date(issue.first_seen).toLocaleString()}</span>
-                      <span className="sm:hidden">
-                        <span className="mx-1.5 opacity-40">&middot;</span>
-                        <span className="font-mono text-xs">{issue.event_count} ev</span>
-                        <span className="mx-1.5 opacity-40">&middot;</span>
-                        <span className="font-mono text-xs">{issue.user_count || 0} usr</span>
-                      </span>
-                    </p>
                   </div>
                   <div className="w-16 text-right ml-4 shrink-0 hidden sm:block">
                     <p className="text-sm font-semibold font-mono">{issue.event_count}</p>
@@ -686,6 +718,79 @@ function MergeDialog({ issues, onClose, onMerge }: { issues: Issue[]; onClose: (
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function parseIssueTitle(title: string): { exceptionType: string; message: string } {
+  const colonIdx = title.indexOf(': ')
+  if (colonIdx > 0 && colonIdx < 60) {
+    return {
+      exceptionType: title.slice(0, colonIdx),
+      message: title.slice(colonIdx + 2),
+    }
+  }
+  return { exceptionType: '', message: title }
+}
+
+function DetailedIssueRow({ issue, fetchedAt }: { issue: Issue; fetchedAt: number | null }) {
+  const { exceptionType, message } = parseIssueTitle(issue.title)
+  const statusBadge = issue.status !== 'open' ? (
+    <Badge variant={STATUS_COLORS[issue.status] || 'outline'} className="text-[10px] ml-2">
+      {issue.status}
+    </Badge>
+  ) : null
+
+  return (
+    <>
+      <div className="flex items-center gap-1.5 min-w-0">
+        {exceptionType ? (
+          <>
+            <span className="font-semibold text-sm truncate shrink-0">{exceptionType}</span>
+            {issue.culprit && (
+              <>
+                <span className="text-muted-foreground/40 shrink-0">&middot;</span>
+                <span className="text-sm text-muted-foreground truncate">{issue.culprit}</span>
+              </>
+            )}
+          </>
+        ) : (
+          <span className="font-semibold text-sm truncate">{issue.title}</span>
+        )}
+        {statusBadge}
+        {issue.priority !== 50 && (
+          <span className={cn(
+            'text-[10px] font-mono px-1 py-0.5 rounded shrink-0',
+            issue.priority > 75 ? 'bg-red-500/15 text-red-400' :
+            issue.priority > 50 ? 'bg-amber-500/15 text-amber-400' :
+            issue.priority > 25 ? 'bg-blue-500/15 text-blue-400' :
+            'bg-muted text-muted-foreground'
+          )}>
+            P{issue.priority}
+          </span>
+        )}
+      </div>
+      {exceptionType && message && (
+        <p className="text-sm text-muted-foreground truncate mt-0.5">{message}</p>
+      )}
+      {issue.tags && issue.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-0.5">
+          {issue.tags.map(t => (
+            <span key={`${t.key}:${t.value}`} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-primary/10 text-primary/80">
+              {t.key}:{t.value}
+            </span>
+          ))}
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground/60 mt-0.5">
+        {fetchedAt ? formatRelativeTime(issue.last_seen, fetchedAt) : new Date(issue.last_seen).toLocaleString()}
+        {issue.first_seen !== issue.last_seen && (
+          <>
+            <span className="mx-1 opacity-40">&ndash;</span>
+            {fetchedAt ? formatRelativeTime(issue.first_seen, fetchedAt) : new Date(issue.first_seen).toLocaleString()}
+          </>
+        )}
+      </p>
+    </>
   )
 }
 

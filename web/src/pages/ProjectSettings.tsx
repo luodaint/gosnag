@@ -107,6 +107,7 @@ export default function ProjectSettings() {
   const [defaultCooldown, setDefaultCooldown] = useState('60')
   const [warningAsError, setWarningAsError] = useState(false)
   const [maxEventsPerIssue, setMaxEventsPerIssue] = useState('1000')
+  const [issueDisplayMode, setIssueDisplayMode] = useState('classic')
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const [savingGeneral, setSavingGeneral] = useState(false)
   const [savingJira, setSavingJira] = useState(false)
@@ -138,6 +139,7 @@ export default function ProjectSettings() {
     setJiraApiToken('')
     setJiraProjectKey(p.jira_project_key || '')
     setJiraIssueType(p.jira_issue_type || 'Bug')
+    setIssueDisplayMode(p.issue_display_mode || 'classic')
     setSelectedGroupId(p.group_id || '')
   }
 
@@ -153,6 +155,7 @@ export default function ProjectSettings() {
     default_cooldown_minutes: parseInt(defaultCooldown) || 0,
     warning_as_error: warningAsError,
     max_events_per_issue: parseInt(maxEventsPerIssue) || 0,
+    issue_display_mode: issueDisplayMode,
     jira_base_url: jiraBaseUrl,
     jira_email: jiraEmail,
     jira_api_token: jiraApiToken,
@@ -801,6 +804,17 @@ export default function ProjectSettings() {
                       />
                       <p className="mt-1 text-xs text-muted-foreground">
                         Stop recording new events for an issue after this limit. Set to 0 for unlimited.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium">Issue List Display</label>
+                      <Select value={issueDisplayMode} onChange={e => setIssueDisplayMode(e.target.value)} className="mt-1 max-w-xs">
+                        <option value="classic">Classic (badges + full title)</option>
+                        <option value="detailed">Detailed (exception + endpoint + message)</option>
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Default display mode for the issue list. Users can toggle per-session.
                       </p>
                     </div>
 
