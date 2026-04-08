@@ -6,6 +6,9 @@ RETURNING *;
 -- name: GetProject :one
 SELECT * FROM projects WHERE id = $1;
 
+-- name: GetProjectByNumericID :one
+SELECT * FROM projects WHERE numeric_id = $1;
+
 -- name: GetProjectBySlug :one
 SELECT * FROM projects WHERE slug = $1;
 

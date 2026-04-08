@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -42,6 +43,7 @@ type CreateProjectRequest struct {
 // SafeProject strips sensitive fields (Jira API token) from the project for API responses.
 type SafeProject struct {
 	ID                     uuid.UUID `json:"id"`
+	NumericID              int32     `json:"numeric_id"`
 	Name                   string    `json:"name"`
 	Slug                   string    `json:"slug"`
 	DefaultCooldownMinutes int32     `json:"default_cooldown_minutes"`
@@ -71,6 +73,7 @@ func nullUUIDToStringPtr(u uuid.NullUUID) *string {
 func toSafeProject(p db.Project) SafeProject {
 	return SafeProject{
 		ID:                     p.ID,
+		NumericID:              p.NumericID,
 		Name:                   p.Name,
 		Slug:                   p.Slug,
 		DefaultCooldownMinutes: p.DefaultCooldownMinutes,
@@ -92,7 +95,8 @@ func toSafeProject(p db.Project) SafeProject {
 
 type ProjectResponse struct {
 	SafeProject
-	DSN string `json:"dsn,omitempty"`
+	DSN       string `json:"dsn,omitempty"`
+	LegacyDSN string `json:"legacy_dsn,omitempty"`
 }
 
 type ProjectKeyResponse struct {
@@ -148,8 +152,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dsn := buildDSN(r, key.PublicKey, project.ID)
-	writeJSON(w, http.StatusCreated, ProjectResponse{SafeProject: toSafeProject(project), DSN: dsn})
+	dsn := buildDSN(r, key.PublicKey, project.NumericID)
+	legacyDSN := buildLegacyDSN(r, key.PublicKey, project.ID)
+	writeJSON(w, http.StatusCreated, ProjectResponse{SafeProject: toSafeProject(project), DSN: dsn, LegacyDSN: legacyDSN})
 }
 
 type ProjectListItem struct {
@@ -196,11 +201,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dsn := ""
+	legacyDSN := ""
 	if len(keys) > 0 {
-		dsn = buildDSN(r, keys[0].PublicKey, project.ID)
+		dsn = buildDSN(r, keys[0].PublicKey, project.NumericID)
+		legacyDSN = buildLegacyDSN(r, keys[0].PublicKey, project.ID)
 	}
 
-	writeJSON(w, http.StatusOK, ProjectResponse{SafeProject: toSafeProject(project), DSN: dsn})
+	writeJSON(w, http.StatusOK, ProjectResponse{SafeProject: toSafeProject(project), DSN: dsn, LegacyDSN: legacyDSN})
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -377,7 +384,18 @@ func generateKeyPair() (string, string) {
 	return hex.EncodeToString(pub), hex.EncodeToString(sec)
 }
 
-func buildDSN(r *http.Request, publicKey string, projectID uuid.UUID) string {
+func buildDSN(r *http.Request, publicKey string, numericID int32) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd != "" {
+		scheme = fwd
+	}
+	return scheme + "://" + publicKey + "@" + r.Host + "/" + fmt.Sprintf("%d", numericID)
+}
+
+func buildLegacyDSN(r *http.Request, publicKey string, projectID uuid.UUID) string {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"

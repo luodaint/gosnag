@@ -216,9 +216,9 @@ export default function ProjectSettings() {
     navigate('/')
   }
 
-  const handleCopyDSN = () => {
-    if (project?.dsn) {
-      navigator.clipboard.writeText(project.dsn)
+  const handleCopyDSN = (dsn?: string) => {
+    if (dsn) {
+      navigator.clipboard.writeText(dsn)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
       toast.success('DSN copied to clipboard')
@@ -701,21 +701,40 @@ export default function ProjectSettings() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">DSN (Client Key)</CardTitle>
-                  <CardDescription>Use this DSN in your Sentry SDK configuration. This value is read-only.</CardDescription>
+                  <CardDescription>Use this DSN in your Sentry SDK configuration. The numeric DSN is compatible with all SDKs including Python.</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono break-all">
-                      {project?.dsn}
-                    </code>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button variant="outline" size="icon" onClick={handleCopyDSN}>
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Copy DSN</TooltipContent>
-                    </Tooltip>
+                <CardContent className="space-y-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Numeric (recommended — works with all SDKs)</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono break-all">
+                        {project?.dsn}
+                      </code>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="outline" size="icon" onClick={() => handleCopyDSN(project?.dsn)}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Copy DSN</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">UUID (legacy — for existing integrations)</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono break-all">
+                        {project?.legacy_dsn}
+                      </code>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="outline" size="icon" onClick={() => handleCopyDSN(project?.legacy_dsn)}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Copy legacy DSN</TooltipContent>
+                      </Tooltip>
+                    </div>
                   </div>
                   {copied && <p className="mt-1 text-xs text-emerald-400">Copied!</p>}
                 </CardContent>

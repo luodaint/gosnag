@@ -15,7 +15,7 @@ import (
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (name, slug, default_cooldown_minutes)
 VALUES ($1, $2, $3)
-RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position
+RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id
 `
 
 type CreateProjectParams struct {
@@ -45,6 +45,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Icon,
 		&i.Color,
 		&i.Position,
+		&i.NumericID,
 	)
 	return i, err
 }
@@ -91,7 +92,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id uuid.UUID) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position FROM projects WHERE id = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id FROM projects WHERE id = $1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error) {
@@ -115,12 +116,43 @@ func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error)
 		&i.Icon,
 		&i.Color,
 		&i.Position,
+		&i.NumericID,
+	)
+	return i, err
+}
+
+const getProjectByNumericID = `-- name: GetProjectByNumericID :one
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id FROM projects WHERE numeric_id = $1
+`
+
+func (q *Queries) GetProjectByNumericID(ctx context.Context, numericID int32) (Project, error) {
+	row := q.db.QueryRowContext(ctx, getProjectByNumericID, numericID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.DefaultCooldownMinutes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WarningAsError,
+		&i.JiraBaseUrl,
+		&i.JiraEmail,
+		&i.JiraApiToken,
+		&i.JiraProjectKey,
+		&i.JiraIssueType,
+		&i.GroupID,
+		&i.MaxEventsPerIssue,
+		&i.Icon,
+		&i.Color,
+		&i.Position,
+		&i.NumericID,
 	)
 	return i, err
 }
 
 const getProjectBySlug = `-- name: GetProjectBySlug :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position FROM projects WHERE slug = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id FROM projects WHERE slug = $1
 `
 
 func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, error) {
@@ -144,6 +176,7 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, e
 		&i.Icon,
 		&i.Color,
 		&i.Position,
+		&i.NumericID,
 	)
 	return i, err
 }
@@ -361,7 +394,7 @@ func (q *Queries) ListProjectKeys(ctx context.Context, projectID uuid.UUID) ([]P
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position FROM projects ORDER BY position, created_at DESC
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id FROM projects ORDER BY position, created_at DESC
 `
 
 func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
@@ -391,6 +424,7 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.Icon,
 			&i.Color,
 			&i.Position,
+			&i.NumericID,
 		); err != nil {
 			return nil, err
 		}
@@ -413,7 +447,7 @@ SET name = $2, slug = $3, default_cooldown_minutes = $4, warning_as_error = $5,
     icon = $12, color = $13,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position
+RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id
 `
 
 type UpdateProjectParams struct {
@@ -467,6 +501,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.Icon,
 		&i.Color,
 		&i.Position,
+		&i.NumericID,
 	)
 	return i, err
 }

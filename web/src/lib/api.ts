@@ -179,6 +179,7 @@ export interface ProjectGroup {
 
 export interface Project {
   id: string
+  numeric_id: number
   name: string
   slug: string
   default_cooldown_minutes: number
@@ -205,6 +206,7 @@ export interface Project {
 
 export interface ProjectWithDSN extends Project {
   dsn: string
+  legacy_dsn: string
 }
 
 export interface Issue {

@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN numeric_id SERIAL NOT NULL UNIQUE;

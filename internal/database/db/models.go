@@ -148,6 +148,7 @@ type Project struct {
 	Icon                   string        `json:"icon"`
 	Color                  string        `json:"color"`
 	Position               int32         `json:"position"`
+	NumericID              int32         `json:"numeric_id"`
 }
 
 type ProjectFavorite struct {

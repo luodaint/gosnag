@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
@@ -115,10 +116,6 @@ func (h *Handler) Envelope(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) authenticate(r *http.Request) (uuid.UUID, db.ProjectKey, error) {
 	projectIDStr := extractProjectID(r)
-	projectID, err := uuid.Parse(projectIDStr)
-	if err != nil {
-		return uuid.Nil, db.ProjectKey{}, err
-	}
 
 	publicKey := ExtractPublicKey(r)
 	if publicKey == "" {
@@ -130,11 +127,27 @@ func (h *Handler) authenticate(r *http.Request) (uuid.UUID, db.ProjectKey, error
 		return uuid.Nil, db.ProjectKey{}, errUnauthorized
 	}
 
-	if key.ProjectID != projectID {
-		return uuid.Nil, db.ProjectKey{}, errUnauthorized
+	// Try UUID first, then numeric ID
+	if projectID, err := uuid.Parse(projectIDStr); err == nil {
+		if key.ProjectID != projectID {
+			return uuid.Nil, db.ProjectKey{}, errUnauthorized
+		}
+		return projectID, key, nil
 	}
 
-	return projectID, key, nil
+	// Try numeric ID (for Python SDK and others that require numeric project IDs)
+	if numericID, err := strconv.Atoi(projectIDStr); err == nil {
+		project, err := h.queries.GetProjectByNumericID(r.Context(), int32(numericID))
+		if err != nil {
+			return uuid.Nil, db.ProjectKey{}, errUnauthorized
+		}
+		if key.ProjectID != project.ID {
+			return uuid.Nil, db.ProjectKey{}, errUnauthorized
+		}
+		return project.ID, key, nil
+	}
+
+	return uuid.Nil, db.ProjectKey{}, errUnauthorized
 }
 
 func (h *Handler) processEvent(r *http.Request, project db.Project, event *SentryEvent) {
