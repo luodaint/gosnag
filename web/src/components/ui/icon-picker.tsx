@@ -1,41 +1,26 @@
-import { useState } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import {
-  Bug, Shield, Zap, Globe, Server, Database, Code, Terminal, Cpu, Cloud,
-  Smartphone, Monitor, Lock, Key, Webhook, Layers, Package, Rocket,
-  ShoppingCart, CreditCard, Users, Mail, Bell, Heart, Flame, Star,
-  Activity, BarChart3, GitBranch, Boxes,
-} from 'lucide-react'
-
-const LUCIDE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  bug: Bug, shield: Shield, zap: Zap, globe: Globe, server: Server,
-  database: Database, code: Code, terminal: Terminal, cpu: Cpu, cloud: Cloud,
-  smartphone: Smartphone, monitor: Monitor, lock: Lock, key: Key,
-  webhook: Webhook, layers: Layers, package: Package, rocket: Rocket,
-  'shopping-cart': ShoppingCart, 'credit-card': CreditCard, users: Users,
-  mail: Mail, bell: Bell, heart: Heart, flame: Flame, star: Star,
-  activity: Activity, 'bar-chart-3': BarChart3, 'git-branch': GitBranch, boxes: Boxes,
-}
-
-const EMOJIS = [
-  '🚀', '🔥', '⚡', '🛡️', '🐛', '💳', '🛒', '📱', '🖥️', '☁️',
-  '🔒', '📧', '🔔', '❤️', '⭐', '🎯', '🏠', '📊', '🔧', '⚙️',
-  '🌐', '💾', '📦', '🎮', '🏦', '🏥', '🎓', '✈️', '🚗', '🍕',
-  '🎵', '📸', '🔬', '💡', '🎨', '📝', '🗂️', '💬', '🤖', '🧪',
-]
+import { Input } from '@/components/ui/input'
+import data from '@emoji-mart/data'
+import Picker from '@emoji-mart/react'
+import DynamicIcon, { iconNames } from 'lucide-react/dist/esm/DynamicIcon'
 
 export const PROJECT_COLORS = [
   '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4',
   '#ef4444', '#f97316', '#84cc16', '#14b8a6', '#6366f1', '#a855f7',
 ]
 
+// Deduplicate icon names (some are aliases)
+const ICON_NAMES = iconNames.filter((n: string) => !n.includes('_'))
+
+const ICONS_PER_PAGE = 80
+
 export function resolveIcon(value: string): React.ReactNode {
   if (!value) return null
   if (value.startsWith('lucide:')) {
     const name = value.slice(7)
-    const Icon = LUCIDE_ICONS[name]
-    return Icon ? <Icon className="h-5 w-5" /> : null
+    return <DynamicIcon name={name as never} className="h-5 w-5" />
   }
   return <span className="text-lg leading-none">{value}</span>
 }
@@ -51,8 +36,42 @@ interface IconPickerProps {
 export function IconPicker({ value, color, fallbackColor, onChange, className }: IconPickerProps) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<'emoji' | 'icons'>('emoji')
+  const [iconSearch, setIconSearch] = useState('')
+  const [iconPage, setIconPage] = useState(0)
+  const gridRef = useRef<HTMLDivElement>(null)
 
   const activeColor = color || fallbackColor
+
+  // Reset search and page when tab changes or dialog opens
+  useEffect(() => {
+    if (open) {
+      setIconSearch('')
+      setIconPage(0)
+    }
+  }, [open, tab])
+
+  const filteredIcons = useMemo(() => {
+    if (!iconSearch) return ICON_NAMES
+    const q = iconSearch.toLowerCase()
+    return ICON_NAMES.filter((name: string) => name.includes(q))
+  }, [iconSearch])
+
+  const pagedIcons = useMemo(() => {
+    const start = iconPage * ICONS_PER_PAGE
+    return filteredIcons.slice(start, start + ICONS_PER_PAGE)
+  }, [filteredIcons, iconPage])
+
+  const totalPages = Math.ceil(filteredIcons.length / ICONS_PER_PAGE)
+
+  const handleEmojiSelect = useCallback((emoji: { native: string }) => {
+    onChange(emoji.native, color)
+    setOpen(false)
+  }, [onChange, color])
+
+  const handleIconSelect = useCallback((name: string) => {
+    onChange(`lucide:${name}`, color)
+    setOpen(false)
+  }, [onChange, color])
 
   return (
     <div className={className}>
@@ -71,11 +90,13 @@ export function IconPicker({ value, color, fallbackColor, onChange, className }:
       </button>
 
       <Dialog open={open} onOpenChange={(v) => { if (!v) setOpen(false) }}>
-        <DialogContent className="max-w-sm" onClick={(e) => e.stopPropagation()}>
-          <DialogTitle>Icon & Color</DialogTitle>
-          <DialogDescription className="sr-only">Choose an icon and color for this project</DialogDescription>
+        <DialogContent className="max-w-md p-0 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="px-5 pt-5 pb-0">
+            <DialogTitle>Icon & Color</DialogTitle>
+            <DialogDescription className="sr-only">Choose an icon and color for this project</DialogDescription>
+          </div>
 
-          <div className="space-y-4 mt-2">
+          <div className="space-y-3 px-5 pb-5">
             {/* Tabs */}
             <div className="flex gap-1 border-b border-border/40 pb-2">
               <button
@@ -97,39 +118,74 @@ export function IconPicker({ value, color, fallbackColor, onChange, className }:
               )}
             </div>
 
-            {/* Emoji grid */}
+            {/* Emoji picker (emoji-mart) */}
             {tab === 'emoji' && (
-              <div className="grid grid-cols-10 gap-1">
-                {EMOJIS.map(emoji => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    className={cn(
-                      'h-8 w-8 flex items-center justify-center rounded text-lg hover:bg-accent/60 transition-colors',
-                      value === emoji && 'bg-accent ring-1 ring-primary/40'
-                    )}
-                    onClick={() => { onChange(emoji, color); setOpen(false) }}
-                  >{emoji}</button>
-                ))}
+              <div className="[&_.em-emoji-picker]:!border-0 [&_.em-emoji-picker]:!bg-transparent [&_.em-emoji-picker]:!font-sans">
+                <Picker
+                  data={data}
+                  onEmojiSelect={handleEmojiSelect}
+                  theme="dark"
+                  set="native"
+                  skinTonePosition="search"
+                  previewPosition="none"
+                  navPosition="top"
+                  perLine={9}
+                  maxFrequentRows={1}
+                  emojiSize={28}
+                  emojiButtonSize={36}
+                />
               </div>
             )}
 
-            {/* Lucide grid */}
+            {/* Lucide icons grid with search */}
             {tab === 'icons' && (
-              <div className="grid grid-cols-10 gap-1">
-                {Object.entries(LUCIDE_ICONS).map(([name, Icon]) => (
-                  <button
-                    key={name}
-                    type="button"
-                    className={cn(
-                      'h-8 w-8 flex items-center justify-center rounded hover:bg-accent/60 transition-colors',
-                      value === `lucide:${name}` && 'bg-accent ring-1 ring-primary/40'
-                    )}
-                    onClick={() => { onChange(`lucide:${name}`, color); setOpen(false) }}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </button>
-                ))}
+              <div className="space-y-2">
+                <Input
+                  placeholder="Search icons..."
+                  value={iconSearch}
+                  onChange={(e) => { setIconSearch(e.target.value); setIconPage(0) }}
+                  className="h-8 text-sm"
+                  autoFocus
+                />
+                <div ref={gridRef} className="grid grid-cols-10 gap-1 min-h-[200px] max-h-[280px] overflow-y-auto">
+                  {pagedIcons.map((name: string) => (
+                    <button
+                      key={name}
+                      type="button"
+                      title={name}
+                      className={cn(
+                        'h-8 w-8 flex items-center justify-center rounded hover:bg-accent/60 transition-colors',
+                        value === `lucide:${name}` && 'bg-accent ring-1 ring-primary/40'
+                      )}
+                      onClick={() => handleIconSelect(name)}
+                    >
+                      <DynamicIcon name={name as never} className="h-4 w-4" />
+                    </button>
+                  ))}
+                  {pagedIcons.length === 0 && (
+                    <p className="col-span-10 text-center text-xs text-muted-foreground py-8">No icons found</p>
+                  )}
+                </div>
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
+                    <span>{filteredIcons.length} icons</span>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        disabled={iconPage === 0}
+                        onClick={() => { setIconPage(p => p - 1); gridRef.current?.scrollTo(0, 0) }}
+                        className="px-2 py-0.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
+                      >&laquo; Prev</button>
+                      <span className="px-1">{iconPage + 1}/{totalPages}</span>
+                      <button
+                        type="button"
+                        disabled={iconPage >= totalPages - 1}
+                        onClick={() => { setIconPage(p => p + 1); gridRef.current?.scrollTo(0, 0) }}
+                        className="px-2 py-0.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
+                      >Next &raquo;</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
