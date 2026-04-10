@@ -17,6 +17,7 @@ import (
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/darkspock/gosnag/internal/ingest"
 	"github.com/darkspock/gosnag/internal/issue"
+	"github.com/darkspock/gosnag/internal/github"
 	"github.com/darkspock/gosnag/internal/jira"
 	"github.com/darkspock/gosnag/internal/n1"
 	"github.com/darkspock/gosnag/internal/priority"
@@ -70,6 +71,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	userHandler := user.NewHandler(queries)
 	alertHandler := alert.NewHandler(queries)
 	jiraHandler := jira.NewHandler(queries, cfg)
+	githubHandler := github.NewHandler(queries, cfg)
 	priorityHandler := priority.NewHandler(queries)
 	tagsHandler := tags.NewHandler(queries)
 	commentHandler := comment.NewHandler(queries)
@@ -80,6 +82,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 		func(projectID uuid.UUID, iss db.Issue, isNew bool) {
 			alertService.Notify(projectID, iss, isNew)
 			go jira.CheckAndCreateTicket(context.Background(), queries, cfg.BaseURL, projectID, iss)
+			go github.CheckAndCreateIssue(context.Background(), queries, cfg.BaseURL, projectID, iss)
 		},
 		func(projectID uuid.UUID, iss db.Issue, eventData json.RawMessage) {
 			statsCache.Invalidate()
@@ -163,6 +166,15 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 					r.With(auth.RequireAdmin).Delete("/{rule_id}", jiraHandler.DeleteRule)
 				})
 
+				// GitHub integration
+				r.With(auth.RequireAdmin).Post("/github/test", githubHandler.TestConnection)
+				r.Route("/github/rules", func(r chi.Router) {
+					r.Get("/", githubHandler.ListRules)
+					r.With(auth.RequireAdmin).Post("/", githubHandler.CreateRule)
+					r.With(auth.RequireAdmin).Put("/{rule_id}", githubHandler.UpdateRule)
+					r.With(auth.RequireAdmin).Delete("/{rule_id}", githubHandler.DeleteRule)
+				})
+
 				// Priority rules
 				r.Route("/priority-rules", func(r chi.Router) {
 					r.Get("/", priorityHandler.ListRules)
@@ -207,6 +219,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.With(auth.RequireWritePermission).Post("/tags", tagsHandler.AddTag)
 				r.With(auth.RequireWritePermission).Delete("/tags", tagsHandler.RemoveTag)
 				r.With(auth.RequireWritePermission).Post("/jira", jiraHandler.CreateTicket)
+				r.With(auth.RequireWritePermission).Post("/github", githubHandler.CreateIssueHandler)
 				r.Post("/follow", issueHandler.Follow)
 				r.Delete("/follow", issueHandler.Unfollow)
 				r.Route("/comments", func(r chi.Router) {

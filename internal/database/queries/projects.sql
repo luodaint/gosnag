@@ -22,6 +22,7 @@ SET name = $2, slug = $3, default_cooldown_minutes = $4, warning_as_error = $5,
     max_events_per_issue = $11,
     icon = $12, color = $13,
     issue_display_mode = $14,
+    github_token = $15, github_owner = $16, github_repo = $17, github_labels = $18,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

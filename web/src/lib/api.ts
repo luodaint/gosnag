@@ -162,6 +162,19 @@ export const api = {
   deleteJiraRule: (projectId: string, ruleId: string) =>
     request<void>(`/projects/${projectId}/jira/rules/${ruleId}`, { method: 'DELETE' }),
 
+  // GitHub
+  testGithubConnection: (projectId: string) =>
+    request<{ ok: boolean; error?: string }>(`/projects/${projectId}/github/test`, { method: 'POST' }),
+  createGithubIssue: (projectId: string, issueId: string) =>
+    request<{ number: number; url: string }>(`/projects/${projectId}/issues/${issueId}/github`, { method: 'POST' }),
+  listGithubRules: (projectId: string) => request<GithubRule[]>(`/projects/${projectId}/github/rules`),
+  createGithubRule: (projectId: string, data: { name: string; enabled: boolean; level_filter: string; min_events: number; min_users: number; title_pattern: string }) =>
+    request<GithubRule>(`/projects/${projectId}/github/rules`, { method: 'POST', body: JSON.stringify(data) }),
+  updateGithubRule: (projectId: string, ruleId: string, data: { name: string; enabled: boolean; level_filter: string; min_events: number; min_users: number; title_pattern: string }) =>
+    request<GithubRule>(`/projects/${projectId}/github/rules/${ruleId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteGithubRule: (projectId: string, ruleId: string) =>
+    request<void>(`/projects/${projectId}/github/rules/${ruleId}`, { method: 'DELETE' }),
+
   // Alerts
   listAlerts: (projectId: string) => request<AlertConfig[]>(`/projects/${projectId}/alerts`),
   createAlert: (projectId: string, data: { alert_type: string; config: object; enabled: boolean; level_filter?: string; title_pattern?: string; min_events?: number; min_velocity_1h?: number; exclude_pattern?: string; conditions?: object }) =>
@@ -213,6 +226,10 @@ export interface Project {
   jira_api_token_set: boolean
   jira_project_key: string
   jira_issue_type: string
+  github_token_set: boolean
+  github_owner: string
+  github_repo: string
+  github_labels: string
   issue_display_mode: string
   group_id: string | null
   created_at: string
@@ -250,6 +267,8 @@ export interface Issue {
   snooze_events_at_start: number
   jira_ticket_key: string | null
   jira_ticket_url: string | null
+  github_issue_number: number | null
+  github_issue_url: string | null
   priority: number
   culprit: string
   first_release: string
@@ -363,6 +382,19 @@ export type PriorityRuleData = {
 }
 
 export interface JiraRule {
+  id: string
+  project_id: string
+  name: string
+  enabled: boolean
+  level_filter: string
+  min_events: number
+  min_users: number
+  title_pattern: string
+  created_at: string
+  updated_at: string
+}
+
+export interface GithubRule {
   id: string
   project_id: string
   name: string

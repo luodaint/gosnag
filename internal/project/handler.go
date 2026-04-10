@@ -38,6 +38,10 @@ type CreateProjectRequest struct {
 	JiraAPIToken           string  `json:"jira_api_token"`
 	JiraProjectKey         string  `json:"jira_project_key"`
 	JiraIssueType          string  `json:"jira_issue_type"`
+	GithubToken            string  `json:"github_token"`
+	GithubOwner            string  `json:"github_owner"`
+	GithubRepo             string  `json:"github_repo"`
+	GithubLabels           string  `json:"github_labels"`
 	GroupID                *string `json:"group_id,omitempty"`
 }
 
@@ -55,11 +59,15 @@ type SafeProject struct {
 	Position               int32     `json:"position"`
 	JiraBaseURL            string    `json:"jira_base_url"`
 	JiraEmail              string    `json:"jira_email"`
-	JiraAPITokenSet        bool      `json:"jira_api_token_set"` // true if configured, never expose the value
+	JiraAPITokenSet        bool      `json:"jira_api_token_set"`
 	JiraProjectKey         string    `json:"jira_project_key"`
-	JiraIssueType          string        `json:"jira_issue_type"`
-	IssueDisplayMode       string        `json:"issue_display_mode"`
-	GroupID                *string       `json:"group_id"`
+	JiraIssueType          string    `json:"jira_issue_type"`
+	GithubTokenSet         bool      `json:"github_token_set"`
+	GithubOwner            string    `json:"github_owner"`
+	GithubRepo             string    `json:"github_repo"`
+	GithubLabels           string    `json:"github_labels"`
+	IssueDisplayMode       string    `json:"issue_display_mode"`
+	GroupID                *string   `json:"group_id"`
 	CreatedAt              time.Time     `json:"created_at"`
 	UpdatedAt              time.Time     `json:"updated_at"`
 }
@@ -89,6 +97,10 @@ func toSafeProject(p db.Project) SafeProject {
 		JiraAPITokenSet:        p.JiraApiToken != "",
 		JiraProjectKey:         p.JiraProjectKey,
 		JiraIssueType:          p.JiraIssueType,
+		GithubTokenSet:         p.GithubToken != "",
+		GithubOwner:            p.GithubOwner,
+		GithubRepo:             p.GithubRepo,
+		GithubLabels:           p.GithubLabels,
 		IssueDisplayMode:       p.IssueDisplayMode,
 		GroupID:                nullUUIDToStringPtr(p.GroupID),
 		CreatedAt:              p.CreatedAt,
@@ -282,6 +294,26 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		jiraApiToken = existing.JiraApiToken
 	}
 
+	githubOwner := req.GithubOwner
+	if githubOwner == "" {
+		githubOwner = existing.GithubOwner
+	}
+	githubRepo := req.GithubRepo
+	if githubRepo == "" {
+		githubRepo = existing.GithubRepo
+	}
+	githubLabels := req.GithubLabels
+	if githubLabels == "" {
+		githubLabels = existing.GithubLabels
+	}
+	if githubLabels == "" {
+		githubLabels = "bug"
+	}
+	githubToken := req.GithubToken
+	if githubToken == "" {
+		githubToken = existing.GithubToken
+	}
+
 	maxEvents := existing.MaxEventsPerIssue
 	if req.MaxEventsPerIssue != nil {
 		maxEvents = *req.MaxEventsPerIssue
@@ -316,6 +348,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Icon:                   icon,
 		Color:                  color,
 		IssueDisplayMode:       issueDisplayMode,
+		GithubToken:            githubToken,
+		GithubOwner:            githubOwner,
+		GithubRepo:             githubRepo,
+		GithubLabels:           githubLabels,
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {

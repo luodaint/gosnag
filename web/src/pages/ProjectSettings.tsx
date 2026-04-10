@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type ProjectWithDSN, type AlertConfig, type APIToken, type JiraRule, type ProjectGroup, type PriorityRule, type TagRule } from '@/lib/api'
+import { api, type ProjectWithDSN, type AlertConfig, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -81,6 +81,23 @@ export default function ProjectSettings() {
   const [ruleMinUsers, setRuleMinUsers] = useState('')
   const [ruleTitlePattern, setRuleTitlePattern] = useState('')
   const [showDeleteRule, setShowDeleteRule] = useState<string | null>(null)
+
+  // GitHub state
+  const [githubOwner, setGithubOwner] = useState('')
+  const [githubRepo, setGithubRepo] = useState('')
+  const [githubToken, setGithubToken] = useState('')
+  const [githubLabels, setGithubLabels] = useState('bug')
+  const [githubTesting, setGithubTesting] = useState(false)
+  const [githubRules, setGithubRules] = useState<GithubRule[]>([])
+  const [showGithubRuleForm, setShowGithubRuleForm] = useState(false)
+  const [editingGithubRule, setEditingGithubRule] = useState<GithubRule | null>(null)
+  const [ghRuleName, setGhRuleName] = useState('')
+  const [ghRuleLevelFilter, setGhRuleLevelFilter] = useState('')
+  const [ghRuleMinEvents, setGhRuleMinEvents] = useState('')
+  const [ghRuleMinUsers, setGhRuleMinUsers] = useState('')
+  const [ghRuleTitlePattern, setGhRuleTitlePattern] = useState('')
+  const [showDeleteGithubRule, setShowDeleteGithubRule] = useState<string | null>(null)
+
   const [priorityRules, setPriorityRules] = useState<PriorityRule[]>([])
   const [showPriorityRuleForm, setShowPriorityRuleForm] = useState(false)
   const [editingPriorityRule, setEditingPriorityRule] = useState<PriorityRule | null>(null)
@@ -111,6 +128,7 @@ export default function ProjectSettings() {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const [savingGeneral, setSavingGeneral] = useState(false)
   const [savingJira, setSavingJira] = useState(false)
+  const [savingGithub, setSavingGithub] = useState(false)
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -139,6 +157,10 @@ export default function ProjectSettings() {
     setJiraApiToken('')
     setJiraProjectKey(p.jira_project_key || '')
     setJiraIssueType(p.jira_issue_type || 'Bug')
+    setGithubOwner(p.github_owner || '')
+    setGithubRepo(p.github_repo || '')
+    setGithubToken('')
+    setGithubLabels(p.github_labels || 'bug')
     setIssueDisplayMode(p.issue_display_mode || 'classic')
     setSelectedGroupId(p.group_id || '')
   }
@@ -161,6 +183,10 @@ export default function ProjectSettings() {
     jira_api_token: jiraApiToken,
     jira_project_key: jiraProjectKey,
     jira_issue_type: jiraIssueType,
+    github_token: githubToken,
+    github_owner: githubOwner,
+    github_repo: githubRepo,
+    github_labels: githubLabels,
     group_id: selectedGroupId || null,
   })
 
@@ -171,6 +197,7 @@ export default function ProjectSettings() {
       api.listAlerts(projectId).then(setAlerts),
       api.listTokens(projectId).then(setTokens),
       api.listJiraRules(projectId).then(setJiraRules),
+      api.listGithubRules(projectId).then(setGithubRules),
       api.listGroups().then(setAllGroups),
       api.listPriorityRules(projectId).then(setPriorityRules),
       api.listTagRules(projectId).then(setTagRules),
@@ -209,6 +236,20 @@ export default function ProjectSettings() {
       toast.error(e instanceof Error ? e.message : 'Failed to save Jira settings')
     } finally {
       setSavingJira(false)
+    }
+  }
+
+  const handleSaveGithub = async () => {
+    if (!projectId) return
+    setSavingGithub(true)
+    try {
+      await api.updateProject(projectId, buildProjectPayload())
+      await refreshProject(projectId)
+      toast.success('GitHub settings saved')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save GitHub settings')
+    } finally {
+      setSavingGithub(false)
     }
   }
 
@@ -426,6 +467,86 @@ export default function ProjectSettings() {
     toast.success('Rule deleted')
   }
 
+  // GitHub handlers
+  const handleTestGithub = async () => {
+    if (!projectId) return
+    setGithubTesting(true)
+    try {
+      await api.updateProject(projectId, buildProjectPayload())
+      await refreshProject(projectId)
+      const result = await api.testGithubConnection(projectId)
+      if (result.ok) {
+        toast.success('GitHub connection successful')
+      } else {
+        toast.error(result.error || 'Connection failed')
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Connection test failed')
+    } finally {
+      setGithubTesting(false)
+    }
+  }
+
+  const openAddGithubRule = () => {
+    setEditingGithubRule(null)
+    setGhRuleName('')
+    setGhRuleLevelFilter('')
+    setGhRuleMinEvents('')
+    setGhRuleMinUsers('')
+    setGhRuleTitlePattern('')
+    setShowGithubRuleForm(true)
+  }
+
+  const openEditGithubRule = (r: GithubRule) => {
+    setEditingGithubRule(r)
+    setGhRuleName(r.name)
+    setGhRuleLevelFilter(r.level_filter)
+    setGhRuleMinEvents(r.min_events > 0 ? String(r.min_events) : '')
+    setGhRuleMinUsers(r.min_users > 0 ? String(r.min_users) : '')
+    setGhRuleTitlePattern(r.title_pattern)
+    setShowGithubRuleForm(true)
+  }
+
+  const handleSaveGithubRule = async () => {
+    if (!projectId) return
+    try {
+      const data = {
+        name: ghRuleName,
+        enabled: editingGithubRule ? editingGithubRule.enabled : true,
+        level_filter: ghRuleLevelFilter,
+        min_events: parseInt(ghRuleMinEvents) || 0,
+        min_users: parseInt(ghRuleMinUsers) || 0,
+        title_pattern: ghRuleTitlePattern,
+      }
+      if (editingGithubRule) {
+        await api.updateGithubRule(projectId, editingGithubRule.id, data)
+      } else {
+        await api.createGithubRule(projectId, data)
+      }
+      setGithubRules(await api.listGithubRules(projectId))
+      setShowGithubRuleForm(false)
+      toast.success(editingGithubRule ? 'Rule updated' : 'Rule created')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save rule')
+    }
+  }
+
+  const handleToggleGithubRule = async (r: GithubRule) => {
+    if (!projectId) return
+    await api.updateGithubRule(projectId, r.id, {
+      name: r.name, enabled: !r.enabled, level_filter: r.level_filter,
+      min_events: r.min_events, min_users: r.min_users, title_pattern: r.title_pattern,
+    })
+    setGithubRules(await api.listGithubRules(projectId))
+  }
+
+  const handleDeleteGithubRule = async (ruleId: string) => {
+    if (!projectId) return
+    await api.deleteGithubRule(projectId, ruleId)
+    setGithubRules(await api.listGithubRules(projectId))
+    toast.success('Rule deleted')
+  }
+
   const RULE_TYPES = [
     { value: 'level_is', label: 'Level is', needsPattern: true, needsThreshold: false },
     { value: 'platform_is', label: 'Platform is', needsPattern: true, needsThreshold: false },
@@ -570,6 +691,12 @@ export default function ProjectSettings() {
     (jiraApiToken || project?.jira_api_token_set)
   )
 
+  const canTestGithub = Boolean(
+    githubOwner &&
+    githubRepo &&
+    (githubToken || project?.github_token_set)
+  )
+
   const sections = [
     {
       id: 'general' as const,
@@ -606,7 +733,7 @@ export default function ProjectSettings() {
           {
             id: 'integrations' as const,
             label: 'Integrations',
-            badge: project?.jira_api_token_set ? 'Connected' : 'Setup',
+            badge: (project?.jira_api_token_set || project?.github_token_set) ? 'Connected' : 'Setup',
             icon: Workflow,
           },
           {
@@ -1436,6 +1563,144 @@ export default function ProjectSettings() {
                   )}
                 </CardContent>
               </Card>
+
+              <div className="space-y-1 mt-8">
+                <h2 className="text-xl font-semibold">GitHub Issues</h2>
+                <p className="text-sm text-muted-foreground">
+                  Create GitHub issues from GoSnag issues, manually or automatically.
+                </p>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">GitHub Connection</CardTitle>
+                  <CardDescription>Repository and authentication details for GitHub issue creation.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="text-sm font-medium">Repository Owner</label>
+                      <Input value={githubOwner} onChange={e => setGithubOwner(e.target.value)} placeholder="e.g. myorg" className="mt-1" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Repository Name</label>
+                      <Input value={githubRepo} onChange={e => setGithubRepo(e.target.value)} placeholder="e.g. my-app" className="mt-1" />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="text-sm font-medium">Personal Access Token</label>
+                      <Input
+                        type="password"
+                        value={githubToken}
+                        onChange={e => setGithubToken(e.target.value)}
+                        placeholder={project?.github_token_set ? '••••••••• (configured)' : 'ghp_... or fine-grained token'}
+                        className="mt-1"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Needs <code>issues: write</code> permission. Leave blank to keep the stored token.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Labels</label>
+                      <Input value={githubLabels} onChange={e => setGithubLabels(e.target.value)} placeholder="bug, gosnag" className="mt-1" />
+                      <p className="mt-1 text-xs text-muted-foreground">Comma-separated labels to apply to created issues.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      {project?.github_token_set ? 'A GitHub token is already stored for this project.' : 'No GitHub token stored yet.'}
+                    </p>
+                    <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                      <Button variant="outline" onClick={handleTestGithub} disabled={githubTesting || !canTestGithub}>
+                        {githubTesting ? 'Testing...' : 'Test Connection'}
+                      </Button>
+                      <Button onClick={handleSaveGithub} disabled={savingGithub}>
+                        {savingGithub ? 'Saving...' : 'Save GitHub Settings'}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <CardTitle className="text-base">GitHub Auto-Creation Rules</CardTitle>
+                    <CardDescription>Rules determine when GoSnag should create GitHub issues automatically.</CardDescription>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={openAddGithubRule} disabled={!githubOwner}>
+                    <Plus className="mr-1 h-4 w-4" /> Add Rule
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {!githubOwner ? (
+                    <div className="py-8 text-center text-muted-foreground">
+                      <p className="text-sm">Configure GitHub first.</p>
+                      <p className="mt-1 text-xs text-muted-foreground/60">
+                        Rules become available once the repository owner is set.
+                      </p>
+                    </div>
+                  ) : githubRules.length === 0 ? (
+                    <div className="py-8 text-center text-muted-foreground">
+                      <p className="text-sm">No auto-creation rules yet.</p>
+                      <p className="mt-1 text-xs text-muted-foreground/60">
+                        Add a rule to automatically create GitHub issues when issues match conditions.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {githubRules.map(r => (
+                        <div key={r.id} className="rounded-md border p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{r.name}</span>
+                              <button
+                                onClick={() => handleToggleGithubRule(r)}
+                                className={cn(
+                                  'rounded px-1.5 py-0.5 text-xs transition-colors',
+                                  r.enabled ? 'bg-emerald-500/15 text-emerald-400' : 'bg-muted text-muted-foreground'
+                                )}
+                              >
+                                {r.enabled ? 'Active' : 'Disabled'}
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditGithubRule(r)}>
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Edit rule</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowDeleteGithubRule(r.id)}>
+                                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Delete rule</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            {r.level_filter && <span>Levels: {r.level_filter}</span>}
+                            {r.min_events > 0 && <span>Min events: {r.min_events}</span>}
+                            {r.min_users > 0 && <span>Min users: {r.min_users}</span>}
+                            {r.title_pattern && <span className="font-mono">Pattern: {r.title_pattern}</span>}
+                            {!r.level_filter && r.min_events === 0 && r.min_users === 0 && !r.title_pattern && (
+                              <span>All issues (no conditions)</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </>
           )}
 
@@ -1570,7 +1835,7 @@ export default function ProjectSettings() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Rule Confirm */}
+      {/* Delete Jira Rule Confirm */}
       <ConfirmDialog
         open={!!showDeleteRule}
         onOpenChange={open => { if (!open) setShowDeleteRule(null) }}
@@ -1579,6 +1844,55 @@ export default function ProjectSettings() {
         confirmLabel="Delete"
         variant="destructive"
         onConfirm={() => { if (showDeleteRule) handleDeleteRule(showDeleteRule) }}
+      />
+
+      {/* GitHub Rule Form Dialog */}
+      <Dialog open={showGithubRuleForm} onOpenChange={setShowGithubRuleForm}>
+        <DialogContent>
+          <DialogTitle>{editingGithubRule ? 'Edit Rule' : 'Add Rule'}</DialogTitle>
+          <DialogDescription className="sr-only">Configure GitHub auto-creation rule</DialogDescription>
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="text-sm font-medium">Name</label>
+              <Input value={ghRuleName} onChange={e => setGhRuleName(e.target.value)} placeholder="e.g. Critical errors" className="mt-1" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Level filter</label>
+              <p className="text-xs text-muted-foreground mb-1">Comma-separated. Empty = all levels.</p>
+              <Input value={ghRuleLevelFilter} onChange={e => setGhRuleLevelFilter(e.target.value)} placeholder="e.g. fatal,error" className="mt-1" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium">Min events</label>
+                <Input type="number" value={ghRuleMinEvents} onChange={e => setGhRuleMinEvents(e.target.value)} placeholder="0" className="mt-1" />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Min users</label>
+                <Input type="number" value={ghRuleMinUsers} onChange={e => setGhRuleMinUsers(e.target.value)} placeholder="0" className="mt-1" />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Title pattern</label>
+              <p className="text-xs text-muted-foreground mb-1">Regex or plain text. Empty = match all.</p>
+              <Input value={ghRuleTitlePattern} onChange={e => setGhRuleTitlePattern(e.target.value)} placeholder="e.g. database|timeout" className="mt-1" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowGithubRuleForm(false)}>Cancel</Button>
+              <Button onClick={handleSaveGithubRule} disabled={!ghRuleName.trim()}>{editingGithubRule ? 'Save' : 'Add'}</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete GitHub Rule Confirm */}
+      <ConfirmDialog
+        open={!!showDeleteGithubRule}
+        onOpenChange={open => { if (!open) setShowDeleteGithubRule(null) }}
+        title="Delete Rule"
+        description="This auto-creation rule will be permanently deleted."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={() => { if (showDeleteGithubRule) handleDeleteGithubRule(showDeleteGithubRule) }}
       />
 
       {/* Revoke Token Confirm */}

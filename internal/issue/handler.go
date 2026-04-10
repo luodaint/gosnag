@@ -63,7 +63,8 @@ func rowToIssue(r db.ListIssuesByProjectRow) db.Issue {
 		ResolvedInRelease: r.ResolvedInRelease, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 		SnoozeUntil: r.SnoozeUntil, SnoozeEventThreshold: r.SnoozeEventThreshold,
 		SnoozeEventsAtStart: r.SnoozeEventsAtStart, JiraTicketKey: r.JiraTicketKey,
-		JiraTicketUrl: r.JiraTicketUrl, Priority: r.Priority, Culprit: r.Culprit,
+		JiraTicketUrl: r.JiraTicketUrl, GithubIssueNumber: r.GithubIssueNumber,
+		GithubIssueUrl: r.GithubIssueUrl, Priority: r.Priority, Culprit: r.Culprit,
 		FirstRelease: r.FirstRelease,
 	}
 }
@@ -648,6 +649,8 @@ func issueJSON(i db.Issue) map[string]any {
 		"snooze_events_at_start": i.SnoozeEventsAtStart,
 		"jira_ticket_key":      nullString(i.JiraTicketKey),
 		"jira_ticket_url":      nullString(i.JiraTicketUrl),
+		"github_issue_number":  nullInt32(i.GithubIssueNumber),
+		"github_issue_url":     nullString(i.GithubIssueUrl),
 		"priority":             i.Priority,
 		"culprit":              i.Culprit,
 		"first_release":        i.FirstRelease,
