@@ -83,6 +83,7 @@ type Issue struct {
 	JiraTicketUrl        sql.NullString `json:"jira_ticket_url"`
 	Priority             int32          `json:"priority"`
 	Culprit              string         `json:"culprit"`
+	FirstRelease         string         `json:"first_release"`
 }
 
 type IssueAlias struct {

@@ -171,13 +171,14 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 
 	// Upsert issue (create or update event count)
 	issue, err := h.queries.UpsertIssue(ctx, db.UpsertIssueParams{
-		ProjectID:   projectID,
-		Title:       event.Title(),
-		Fingerprint: fingerprint,
-		Level:       issueLevel,
-		Platform:    event.Platform,
-		FirstSeen:   now,
-		Culprit:     event.Culprit(),
+		ProjectID:    projectID,
+		Title:        event.Title(),
+		Fingerprint:  fingerprint,
+		Level:        issueLevel,
+		Platform:     event.Platform,
+		FirstSeen:    now,
+		Culprit:      event.Culprit(),
+		FirstRelease: event.Release,
 	})
 	if err != nil {
 		slog.Error("failed to upsert issue", "error", err)

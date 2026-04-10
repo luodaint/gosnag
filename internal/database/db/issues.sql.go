@@ -18,7 +18,7 @@ const assignIssue = `-- name: AssignIssue :one
 UPDATE issues
 SET assigned_to = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit
+RETURNING id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release
 `
 
 type AssignIssueParams struct {
@@ -53,6 +53,7 @@ func (q *Queries) AssignIssue(ctx context.Context, arg AssignIssueParams) (Issue
 		&i.JiraTicketUrl,
 		&i.Priority,
 		&i.Culprit,
+		&i.FirstRelease,
 	)
 	return i, err
 }
@@ -117,6 +118,7 @@ WHERE project_id = $1
     OR ($6::text = 'informational' AND level IN ('warning', 'info', 'debug'))
     OR ($6::text = 'info_only' AND level IN ('info', 'debug')))
   AND ($7::text = '' OR title ILIKE '%' || $7::text || '%')
+  AND ($8::text = '' OR first_release = $8::text)
 `
 
 type CountIssuesByProjectParams struct {
@@ -127,6 +129,7 @@ type CountIssuesByProjectParams struct {
 	AssignedToUser uuid.NullUUID `json:"assigned_to_user"`
 	LevelFilter    string        `json:"level_filter"`
 	Search         string        `json:"search"`
+	ReleaseFilter  string        `json:"release_filter"`
 }
 
 func (q *Queries) CountIssuesByProject(ctx context.Context, arg CountIssuesByProjectParams) (int64, error) {
@@ -138,6 +141,7 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, arg CountIssuesByPro
 		arg.AssignedToUser,
 		arg.LevelFilter,
 		arg.Search,
+		arg.ReleaseFilter,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -195,7 +199,7 @@ func (q *Queries) FollowIssue(ctx context.Context, arg FollowIssueParams) error 
 }
 
 const getExpiredCooldownIssues = `-- name: GetExpiredCooldownIssues :many
-SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit FROM issues
+SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release FROM issues
 WHERE status = 'resolved'
   AND cooldown_until IS NOT NULL
   AND cooldown_until < now()
@@ -234,6 +238,7 @@ func (q *Queries) GetExpiredCooldownIssues(ctx context.Context) ([]Issue, error)
 			&i.JiraTicketUrl,
 			&i.Priority,
 			&i.Culprit,
+			&i.FirstRelease,
 		); err != nil {
 			return nil, err
 		}
@@ -249,7 +254,7 @@ func (q *Queries) GetExpiredCooldownIssues(ctx context.Context) ([]Issue, error)
 }
 
 const getExpiredSnoozeIssues = `-- name: GetExpiredSnoozeIssues :many
-SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit FROM issues
+SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release FROM issues
 WHERE status = 'snoozed'
   AND snooze_until IS NOT NULL
   AND snooze_until < now()
@@ -288,6 +293,7 @@ func (q *Queries) GetExpiredSnoozeIssues(ctx context.Context) ([]Issue, error) {
 			&i.JiraTicketUrl,
 			&i.Priority,
 			&i.Culprit,
+			&i.FirstRelease,
 		); err != nil {
 			return nil, err
 		}
@@ -303,7 +309,7 @@ func (q *Queries) GetExpiredSnoozeIssues(ctx context.Context) ([]Issue, error) {
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit FROM issues WHERE id = $1
+SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release FROM issues WHERE id = $1
 `
 
 func (q *Queries) GetIssue(ctx context.Context, id uuid.UUID) (Issue, error) {
@@ -333,12 +339,13 @@ func (q *Queries) GetIssue(ctx context.Context, id uuid.UUID) (Issue, error) {
 		&i.JiraTicketUrl,
 		&i.Priority,
 		&i.Culprit,
+		&i.FirstRelease,
 	)
 	return i, err
 }
 
 const getIssueByFingerprint = `-- name: GetIssueByFingerprint :one
-SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit FROM issues WHERE project_id = $1 AND fingerprint = $2
+SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release FROM issues WHERE project_id = $1 AND fingerprint = $2
 `
 
 type GetIssueByFingerprintParams struct {
@@ -373,6 +380,7 @@ func (q *Queries) GetIssueByFingerprint(ctx context.Context, arg GetIssueByFinge
 		&i.JiraTicketUrl,
 		&i.Priority,
 		&i.Culprit,
+		&i.FirstRelease,
 	)
 	return i, err
 }
@@ -498,8 +506,37 @@ func (q *Queries) ListIssueFollowers(ctx context.Context, issueID uuid.UUID) ([]
 	return items, nil
 }
 
+const listIssueReleases = `-- name: ListIssueReleases :many
+SELECT DISTINCT first_release FROM issues
+WHERE project_id = $1 AND first_release != ''
+ORDER BY first_release
+`
+
+func (q *Queries) ListIssueReleases(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listIssueReleases, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var first_release string
+		if err := rows.Scan(&first_release); err != nil {
+			return nil, err
+		}
+		items = append(items, first_release)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssuesByIDs = `-- name: ListIssuesByIDs :many
-SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit FROM issues WHERE id = ANY($1::uuid[]) ORDER BY last_seen DESC
+SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release FROM issues WHERE id = ANY($1::uuid[]) ORDER BY last_seen DESC
 `
 
 func (q *Queries) ListIssuesByIDs(ctx context.Context, ids []uuid.UUID) ([]Issue, error) {
@@ -535,6 +572,7 @@ func (q *Queries) ListIssuesByIDs(ctx context.Context, ids []uuid.UUID) ([]Issue
 			&i.JiraTicketUrl,
 			&i.Priority,
 			&i.Culprit,
+			&i.FirstRelease,
 		); err != nil {
 			return nil, err
 		}
@@ -551,7 +589,7 @@ func (q *Queries) ListIssuesByIDs(ctx context.Context, ids []uuid.UUID) ([]Issue
 
 const listIssuesByProject = `-- name: ListIssuesByProject :many
 
-SELECT i.id, i.project_id, i.title, i.fingerprint, i.status, i.level, i.platform, i.first_seen, i.last_seen, i.event_count, i.assigned_to, i.resolved_at, i.cooldown_until, i.resolved_in_release, i.created_at, i.updated_at, i.snooze_until, i.snooze_event_threshold, i.snooze_events_at_start, i.jira_ticket_key, i.jira_ticket_url, i.priority, i.culprit, EXISTS(SELECT 1 FROM issue_follows f WHERE f.issue_id = i.id AND f.user_id = $7::uuid) AS followed
+SELECT i.id, i.project_id, i.title, i.fingerprint, i.status, i.level, i.platform, i.first_seen, i.last_seen, i.event_count, i.assigned_to, i.resolved_at, i.cooldown_until, i.resolved_in_release, i.created_at, i.updated_at, i.snooze_until, i.snooze_event_threshold, i.snooze_events_at_start, i.jira_ticket_key, i.jira_ticket_url, i.priority, i.culprit, i.first_release, EXISTS(SELECT 1 FROM issue_follows f WHERE f.issue_id = i.id AND f.user_id = $7::uuid) AS followed
 FROM issues i
 WHERE i.project_id = $1
   AND ($2::text = '' OR i.status = $2::text)
@@ -564,6 +602,7 @@ WHERE i.project_id = $1
     OR ($9::text = 'informational' AND i.level IN ('warning', 'info', 'debug'))
     OR ($9::text = 'info_only' AND i.level IN ('info', 'debug')))
   AND ($10::text = '' OR i.title ILIKE '%' || $10::text || '%')
+  AND ($11::text = '' OR i.first_release = $11::text)
 ORDER BY followed DESC, i.last_seen DESC
 LIMIT $3 OFFSET $4
 `
@@ -579,6 +618,7 @@ type ListIssuesByProjectParams struct {
 	AssignedToUser uuid.NullUUID `json:"assigned_to_user"`
 	LevelFilter    string        `json:"level_filter"`
 	Search         string        `json:"search"`
+	ReleaseFilter  string        `json:"release_filter"`
 }
 
 type ListIssuesByProjectRow struct {
@@ -605,6 +645,7 @@ type ListIssuesByProjectRow struct {
 	JiraTicketUrl        sql.NullString `json:"jira_ticket_url"`
 	Priority             int32          `json:"priority"`
 	Culprit              string         `json:"culprit"`
+	FirstRelease         string         `json:"first_release"`
 	Followed             bool           `json:"followed"`
 }
 
@@ -625,6 +666,7 @@ func (q *Queries) ListIssuesByProject(ctx context.Context, arg ListIssuesByProje
 		arg.AssignedToUser,
 		arg.LevelFilter,
 		arg.Search,
+		arg.ReleaseFilter,
 	)
 	if err != nil {
 		return nil, err
@@ -657,6 +699,7 @@ func (q *Queries) ListIssuesByProject(ctx context.Context, arg ListIssuesByProje
 			&i.JiraTicketUrl,
 			&i.Priority,
 			&i.Culprit,
+			&i.FirstRelease,
 			&i.Followed,
 		); err != nil {
 			return nil, err
@@ -673,7 +716,7 @@ func (q *Queries) ListIssuesByProject(ctx context.Context, arg ListIssuesByProje
 }
 
 const listOpenN1Issues = `-- name: ListOpenN1Issues :many
-SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit FROM issues
+SELECT id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release FROM issues
 WHERE project_id = $1
   AND status = 'open'
   AND fingerprint LIKE 'n1:%'
@@ -712,6 +755,7 @@ func (q *Queries) ListOpenN1Issues(ctx context.Context, projectID uuid.UUID) ([]
 			&i.JiraTicketUrl,
 			&i.Priority,
 			&i.Culprit,
+			&i.FirstRelease,
 		); err != nil {
 			return nil, err
 		}
@@ -751,7 +795,7 @@ SET status = $2,
     snooze_events_at_start = $8,
     updated_at = now()
 WHERE id = $1
-RETURNING id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit
+RETURNING id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release
 `
 
 type UpdateIssueStatusParams struct {
@@ -801,13 +845,14 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.JiraTicketUrl,
 		&i.Priority,
 		&i.Culprit,
+		&i.FirstRelease,
 	)
 	return i, err
 }
 
 const upsertIssue = `-- name: UpsertIssue :one
-INSERT INTO issues (project_id, title, fingerprint, level, platform, first_seen, last_seen, event_count, culprit)
-VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7)
+INSERT INTO issues (project_id, title, fingerprint, level, platform, first_seen, last_seen, event_count, culprit, first_release)
+VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7, $8)
 ON CONFLICT (project_id, fingerprint) DO UPDATE
 SET last_seen = $6,
     event_count = issues.event_count + 1,
@@ -816,17 +861,18 @@ SET last_seen = $6,
     platform = EXCLUDED.platform,
     culprit = CASE WHEN EXCLUDED.culprit != '' THEN EXCLUDED.culprit ELSE issues.culprit END,
     updated_at = now()
-RETURNING id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit
+RETURNING id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release
 `
 
 type UpsertIssueParams struct {
-	ProjectID   uuid.UUID `json:"project_id"`
-	Title       string    `json:"title"`
-	Fingerprint string    `json:"fingerprint"`
-	Level       string    `json:"level"`
-	Platform    string    `json:"platform"`
-	FirstSeen   time.Time `json:"first_seen"`
-	Culprit     string    `json:"culprit"`
+	ProjectID    uuid.UUID `json:"project_id"`
+	Title        string    `json:"title"`
+	Fingerprint  string    `json:"fingerprint"`
+	Level        string    `json:"level"`
+	Platform     string    `json:"platform"`
+	FirstSeen    time.Time `json:"first_seen"`
+	Culprit      string    `json:"culprit"`
+	FirstRelease string    `json:"first_release"`
 }
 
 func (q *Queries) UpsertIssue(ctx context.Context, arg UpsertIssueParams) (Issue, error) {
@@ -838,6 +884,7 @@ func (q *Queries) UpsertIssue(ctx context.Context, arg UpsertIssueParams) (Issue
 		arg.Platform,
 		arg.FirstSeen,
 		arg.Culprit,
+		arg.FirstRelease,
 	)
 	var i Issue
 	err := row.Scan(
@@ -864,6 +911,7 @@ func (q *Queries) UpsertIssue(ctx context.Context, arg UpsertIssueParams) (Issue
 		&i.JiraTicketUrl,
 		&i.Priority,
 		&i.Culprit,
+		&i.FirstRelease,
 	)
 	return i, err
 }

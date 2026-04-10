@@ -91,6 +91,7 @@ export default function IssueList() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [showMerge, setShowMerge] = useState(false)
   const [showMobileFilters, setShowMobileFilters] = useState(false)
+  const [releases, setReleases] = useState<string[]>([])
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
@@ -119,6 +120,7 @@ export default function IssueList() {
   const level = searchParams.get('level') || 'errors'
   const sort = searchParams.get('sort') || 'last_seen'
   const activeFilter = searchParams.get('filter') || ''
+  const releaseFilter = searchParams.get('release') || ''
   const offset = parseInt(searchParams.get('offset') || '0', 10)
   const limit = 25
 
@@ -138,6 +140,7 @@ export default function IssueList() {
         setDisplayMode(p.issue_display_mode as 'classic' | 'detailed')
       }
     })
+    api.listIssueReleases(projectId).then(setReleases).catch(() => {})
   }, [projectId])
 
   useEffect(() => {
@@ -157,6 +160,7 @@ export default function IssueList() {
     if (activeFilter === 'today') params.today = true
     if (activeFilter === 'assigned_to_me') params.assigned_to = 'me'
     if (activeFilter === 'assigned_any') params.assigned_any = true
+    if (releaseFilter) params.release = releaseFilter
     if (searchQuery) {
       params.search = searchQuery
       // Also search by tag if it looks like key:value
@@ -178,7 +182,7 @@ export default function IssueList() {
         setTotal(0)
       })
       .finally(() => setLoading(false))
-  }, [projectId, status, level, activeFilter, offset, refreshKey, searchQuery])
+  }, [projectId, status, level, activeFilter, releaseFilter, offset, refreshKey, searchQuery])
 
   // Refresh counts only on manual refresh (not on initial load — already fetched above)
   useEffect(() => {
@@ -409,6 +413,18 @@ export default function IssueList() {
                 className="h-8 pl-8 text-xs"
               />
             </div>
+            {releases.length > 0 && (
+              <Select
+                value={releaseFilter}
+                onChange={e => setFilter('release', e.target.value)}
+                className="h-8 w-auto text-xs max-w-[180px]"
+              >
+                <option value="">All releases</option>
+                {releases.map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </Select>
+            )}
             <Select
               value={sort}
               onChange={e => setFilter('sort', e.target.value)}
@@ -539,6 +555,12 @@ export default function IssueList() {
                         )}
                         <p className="text-sm text-muted-foreground">
                           <span className="font-mono text-xs">{issue.platform}</span>
+                          {issue.first_release && (
+                            <>
+                              <span className="mx-1.5 opacity-40">&middot;</span>
+                              <span className="font-mono text-xs text-primary/70">{issue.first_release}</span>
+                            </>
+                          )}
                           <span className="mx-1.5 opacity-40">&middot;</span>
                           {fetchedAt ? formatRelativeTime(issue.last_seen, fetchedAt) : new Date(issue.last_seen).toLocaleString()}
                           <span className="mx-1.5 opacity-40">&middot;</span>
@@ -787,6 +809,12 @@ function DetailedIssueRow({ issue, fetchedAt }: { issue: Issue; fetchedAt: numbe
           <>
             <span className="mx-1 opacity-40">&ndash;</span>
             {fetchedAt ? formatRelativeTime(issue.first_seen, fetchedAt) : new Date(issue.first_seen).toLocaleString()}
+          </>
+        )}
+        {issue.first_release && (
+          <>
+            <span className="mx-1.5 opacity-40">&middot;</span>
+            <span className="font-mono text-primary/70">{issue.first_release}</span>
           </>
         )}
       </p>

@@ -80,7 +80,7 @@ UPDATE issues SET
     last_seen = COALESCE((SELECT max(e.timestamp) FROM events e WHERE e.issue_id = issues.id), issues.last_seen),
     updated_at = now()
 WHERE issues.id = $1
-RETURNING id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit
+RETURNING id, project_id, title, fingerprint, status, level, platform, first_seen, last_seen, event_count, assigned_to, resolved_at, cooldown_until, resolved_in_release, created_at, updated_at, snooze_until, snooze_event_threshold, snooze_events_at_start, jira_ticket_key, jira_ticket_url, priority, culprit, first_release
 `
 
 func (q *Queries) RecalcIssueStats(ctx context.Context, id uuid.UUID) (Issue, error) {
@@ -110,6 +110,7 @@ func (q *Queries) RecalcIssueStats(ctx context.Context, id uuid.UUID) (Issue, er
 		&i.JiraTicketUrl,
 		&i.Priority,
 		&i.Culprit,
+		&i.FirstRelease,
 	)
 	return i, err
 }

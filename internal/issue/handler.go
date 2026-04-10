@@ -64,6 +64,7 @@ func rowToIssue(r db.ListIssuesByProjectRow) db.Issue {
 		SnoozeUntil: r.SnoozeUntil, SnoozeEventThreshold: r.SnoozeEventThreshold,
 		SnoozeEventsAtStart: r.SnoozeEventsAtStart, JiraTicketKey: r.JiraTicketKey,
 		JiraTicketUrl: r.JiraTicketUrl, Priority: r.Priority, Culprit: r.Culprit,
+		FirstRelease: r.FirstRelease,
 	}
 }
 
@@ -79,6 +80,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	level := q.Get("level")
 	search := q.Get("search")
 	tagFilter := q.Get("tag") // format: key:value
+	releaseFilter := q.Get("release")
 	limit, _ := strconv.ParseInt(q.Get("limit"), 10, 32)
 	offset, _ := strconv.ParseInt(q.Get("offset"), 10, 32)
 	todayOnly := q.Get("today") == "true"
@@ -112,6 +114,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		AssignedToUser: assignedToUser,
 		LevelFilter:    level,
 		Search:         search,
+		ReleaseFilter:  releaseFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -169,6 +172,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		AssignedToUser: assignedToUser,
 		LevelFilter:    level,
 		Search:         search,
+		ReleaseFilter:  releaseFilter,
 	})
 
 	// Adjust count when tag filter adds extra results
@@ -280,6 +284,21 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		"limit":  limit,
 		"offset": offset,
 	})
+}
+
+func (h *Handler) ListReleases(w http.ResponseWriter, r *http.Request) {
+	projectID, err := uuid.Parse(chi.URLParam(r, "project_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	releases, err := h.queries.ListIssueReleases(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list releases")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(releases)
 }
 
 type Follower struct {
@@ -631,6 +650,7 @@ func issueJSON(i db.Issue) map[string]any {
 		"jira_ticket_url":      nullString(i.JiraTicketUrl),
 		"priority":             i.Priority,
 		"culprit":              i.Culprit,
+		"first_release":        i.FirstRelease,
 	}
 	return m
 }

@@ -1,6 +1,6 @@
 -- name: UpsertIssue :one
-INSERT INTO issues (project_id, title, fingerprint, level, platform, first_seen, last_seen, event_count, culprit)
-VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7)
+INSERT INTO issues (project_id, title, fingerprint, level, platform, first_seen, last_seen, event_count, culprit, first_release)
+VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7, $8)
 ON CONFLICT (project_id, fingerprint) DO UPDATE
 SET last_seen = $6,
     event_count = issues.event_count + 1,
@@ -33,6 +33,7 @@ WHERE i.project_id = $1
     OR (sqlc.arg('level_filter')::text = 'informational' AND i.level IN ('warning', 'info', 'debug'))
     OR (sqlc.arg('level_filter')::text = 'info_only' AND i.level IN ('info', 'debug')))
   AND (sqlc.arg('search')::text = '' OR i.title ILIKE '%' || sqlc.arg('search')::text || '%')
+  AND (sqlc.arg('release_filter')::text = '' OR i.first_release = sqlc.arg('release_filter')::text)
 ORDER BY followed DESC, i.last_seen DESC
 LIMIT $3 OFFSET $4;
 
@@ -48,7 +49,8 @@ WHERE project_id = $1
     OR (sqlc.arg('level_filter')::text = 'errors_w' AND level IN ('error', 'fatal', 'warning'))
     OR (sqlc.arg('level_filter')::text = 'informational' AND level IN ('warning', 'info', 'debug'))
     OR (sqlc.arg('level_filter')::text = 'info_only' AND level IN ('info', 'debug')))
-  AND (sqlc.arg('search')::text = '' OR title ILIKE '%' || sqlc.arg('search')::text || '%');
+  AND (sqlc.arg('search')::text = '' OR title ILIKE '%' || sqlc.arg('search')::text || '%')
+  AND (sqlc.arg('release_filter')::text = '' OR first_release = sqlc.arg('release_filter')::text);
 
 -- name: UpdateIssueStatus :one
 UPDATE issues
@@ -151,3 +153,8 @@ SELECT * FROM issues
 WHERE project_id = $1
   AND status = 'open'
   AND fingerprint LIKE 'n1:%';
+
+-- name: ListIssueReleases :many
+SELECT DISTINCT first_release FROM issues
+WHERE project_id = $1 AND first_release != ''
+ORDER BY first_release;

@@ -53,7 +53,7 @@ export const api = {
     request<void>(`/projects/${id}`, { method: 'DELETE' }),
 
   // Issues
-  listIssues: (projectId: string, params?: { status?: string; level?: string; limit?: number; offset?: number; today?: boolean; assigned_to?: string; assigned_any?: boolean; search?: string; tag?: string }) => {
+  listIssues: (projectId: string, params?: { status?: string; level?: string; limit?: number; offset?: number; today?: boolean; assigned_to?: string; assigned_any?: boolean; search?: string; tag?: string; release?: string }) => {
     const q = new URLSearchParams()
     if (params?.status) q.set('status', params.status)
     if (params?.level) q.set('level', params.level)
@@ -64,8 +64,11 @@ export const api = {
     if (params?.assigned_any) q.set('assigned_any', 'true')
     if (params?.search) q.set('search', params.search)
     if (params?.tag) q.set('tag', params.tag)
+    if (params?.release) q.set('release', params.release)
     return request<IssueListResponse>(`/projects/${projectId}/issues?${q}`)
   },
+  listIssueReleases: (projectId: string) =>
+    request<string[]>(`/projects/${projectId}/issues/releases`),
   getIssueCounts: (projectId: string, params?: { level?: string }) => {
     const q = new URLSearchParams()
     if (params?.level) q.set('level', params.level)
@@ -249,6 +252,7 @@ export interface Issue {
   jira_ticket_url: string | null
   priority: number
   culprit: string
+  first_release: string
   followed?: boolean
   followers?: { id: string; name: string; email: string }[]
   tags?: IssueTag[]

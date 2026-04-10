@@ -194,6 +194,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 		// Issues (readable by API tokens, writable needs readwrite permission)
 		r.Route("/projects/{project_id}/issues", func(r chi.Router) {
 			r.Get("/", issueHandler.List)
+			r.Get("/releases", issueHandler.ListReleases)
 			r.With(auth.RequireWritePermission).Delete("/", issueHandler.BulkDelete)
 			r.With(auth.RequireWritePermission).Post("/merge", issueHandler.Merge)
 			r.Get("/counts", issueHandler.Counts)
