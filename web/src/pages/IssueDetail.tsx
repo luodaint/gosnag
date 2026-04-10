@@ -36,6 +36,7 @@ export default function IssueDetail() {
   const [showDelete, setShowDelete] = useState(false)
   const [titleExpanded, setTitleExpanded] = useState(false)
   const [creatingJira, setCreatingJira] = useState(false)
+  const [creatingGithub, setCreatingGithub] = useState(false)
   const [issueTags, setIssueTags] = useState<IssueTag[]>([])
   const [tagInput, setTagInput] = useState('')
   const [followed, setFollowed] = useState(false)
@@ -97,6 +98,20 @@ export default function IssueDetail() {
       toast.error(e instanceof Error ? e.message : 'Failed to create Jira ticket')
     } finally {
       setCreatingJira(false)
+    }
+  }
+
+  const handleCreateGithubIssue = async () => {
+    if (!projectId || !issueId) return
+    setCreatingGithub(true)
+    try {
+      const result = await api.createGithubIssue(projectId, issueId)
+      setIssue(prev => prev ? { ...prev, github_issue_number: result.number, github_issue_url: result.url } : prev)
+      toast.success(`GitHub issue #${result.number} created`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create GitHub issue')
+    } finally {
+      setCreatingGithub(false)
     }
   }
 
@@ -310,6 +325,18 @@ export default function IssueDetail() {
             <Button size="sm" variant="outline" onClick={() => updateStatus('open')}>
               <RotateCcw className="h-4 w-4 mr-1" /> Reopen
             </Button>
+          )}
+          {project?.github_owner && !issue.github_issue_number && (
+            <Button size="sm" variant="secondary" onClick={handleCreateGithubIssue} disabled={creatingGithub}>
+              {creatingGithub ? 'Creating...' : 'GitHub'}
+            </Button>
+          )}
+          {issue.github_issue_number && issue.github_issue_url && (
+            <a href={issue.github_issue_url} target="_blank" rel="noopener noreferrer">
+              <Button size="sm" variant="outline">
+                #{issue.github_issue_number} <ExternalLink className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </a>
           )}
           {project?.jira_base_url && !issue.jira_ticket_key && (
             <Button size="sm" variant="secondary" onClick={handleCreateJiraTicket} disabled={creatingJira}>

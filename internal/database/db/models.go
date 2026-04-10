@@ -59,6 +59,20 @@ type Event struct {
 	UserIdentifier string          `json:"user_identifier"`
 }
 
+type GithubRule struct {
+	ID           uuid.UUID             `json:"id"`
+	ProjectID    uuid.UUID             `json:"project_id"`
+	Name         string                `json:"name"`
+	Enabled      bool                  `json:"enabled"`
+	LevelFilter  string                `json:"level_filter"`
+	MinEvents    int32                 `json:"min_events"`
+	MinUsers     int32                 `json:"min_users"`
+	TitlePattern string                `json:"title_pattern"`
+	Conditions   pqtype.NullRawMessage `json:"conditions"`
+	CreatedAt    time.Time             `json:"created_at"`
+	UpdatedAt    time.Time             `json:"updated_at"`
+}
+
 type Issue struct {
 	ID                   uuid.UUID      `json:"id"`
 	ProjectID            uuid.UUID      `json:"project_id"`
@@ -84,6 +98,8 @@ type Issue struct {
 	Priority             int32          `json:"priority"`
 	Culprit              string         `json:"culprit"`
 	FirstRelease         string         `json:"first_release"`
+	GithubIssueNumber    sql.NullInt32  `json:"github_issue_number"`
+	GithubIssueUrl       sql.NullString `json:"github_issue_url"`
 }
 
 type IssueAlias struct {
@@ -167,6 +183,10 @@ type Project struct {
 	Position               int32         `json:"position"`
 	NumericID              int32         `json:"numeric_id"`
 	IssueDisplayMode       string        `json:"issue_display_mode"`
+	GithubToken            string        `json:"github_token"`
+	GithubOwner            string        `json:"github_owner"`
+	GithubRepo             string        `json:"github_repo"`
+	GithubLabels           string        `json:"github_labels"`
 }
 
 type ProjectFavorite struct {
