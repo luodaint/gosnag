@@ -38,6 +38,23 @@ func (c *StatsCache) Invalidate() {
 	c.dirty.Store(true)
 }
 
+// InvalidateSync forces a synchronous rebuild of the cache.
+// Use after mutations (create/delete) where the next read must see fresh data.
+func (c *StatsCache) InvalidateSync(ctx context.Context) {
+	result, err := buildResult(ctx, c.queries)
+	if err != nil {
+		slog.Error("sync cache rebuild failed", "error", err)
+		c.dirty.Store(true)
+		return
+	}
+	c.mu.Lock()
+	c.data = result
+	c.hasData = true
+	c.buildAt = time.Now()
+	c.dirty.Store(false)
+	c.mu.Unlock()
+}
+
 // Get returns the cached project list. First call builds synchronously.
 // Subsequent calls always return cached data immediately; if dirty and
 // minRefresh has elapsed, an async rebuild is triggered in the background.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/darkspock/gosnag/internal/activity"
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
@@ -119,6 +120,8 @@ func (h *Handler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "issue was linked to a Jira ticket concurrently")
 		return
 	}
+
+	activity.Record(r.Context(), h.queries, issueID, nil, nil, "jira_linked", "", result.Key, map[string]string{"url": result.URL})
 
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"key": result.Key,

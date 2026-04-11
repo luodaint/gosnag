@@ -125,6 +125,7 @@ export default function ProjectSettings() {
   const [warningAsError, setWarningAsError] = useState(false)
   const [maxEventsPerIssue, setMaxEventsPerIssue] = useState('1000')
   const [issueDisplayMode, setIssueDisplayMode] = useState('classic')
+  const [workflowMode, setWorkflowMode] = useState('simple')
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const [savingGeneral, setSavingGeneral] = useState(false)
   const [savingJira, setSavingJira] = useState(false)
@@ -162,6 +163,7 @@ export default function ProjectSettings() {
     setGithubToken('')
     setGithubLabels(p.github_labels || 'bug')
     setIssueDisplayMode(p.issue_display_mode || 'classic')
+    setWorkflowMode(p.workflow_mode || 'simple')
     setSelectedGroupId(p.group_id || '')
   }
 
@@ -178,6 +180,7 @@ export default function ProjectSettings() {
     warning_as_error: warningAsError,
     max_events_per_issue: parseInt(maxEventsPerIssue) || 0,
     issue_display_mode: issueDisplayMode,
+    workflow_mode: workflowMode,
     jira_base_url: jiraBaseUrl,
     jira_email: jiraEmail,
     jira_api_token: jiraApiToken,
@@ -942,6 +945,17 @@ export default function ProjectSettings() {
                       </Select>
                       <p className="mt-1 text-xs text-muted-foreground">
                         Default display mode for the issue list. Users can toggle per-session.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium">Workflow Mode</label>
+                      <Select value={workflowMode} onChange={e => setWorkflowMode(e.target.value)} className="mt-1 max-w-xs">
+                        <option value="simple">Simple (monitoring only)</option>
+                        <option value="managed">Managed (tickets + board)</option>
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Simple: issues have basic statuses. Managed: enables tickets with workflow, assignment, board view, and escalation.
                       </p>
                     </div>
 

@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/lib/use-auth'
-import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment } from '@/lib/api'
+import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
@@ -16,6 +16,8 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { IssueDetailSkeleton } from '@/components/ui/skeleton'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
 import { useKeyboardShortcut } from '@/lib/use-keyboard'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 export default function IssueDetail() {
   const { projectId, issueId } = useParams<{ projectId: string; issueId: string }>()
@@ -46,6 +48,12 @@ export default function IssueDetail() {
   const [editingComment, setEditingComment] = useState<string | null>(null)
   const [editBody, setEditBody] = useState('')
   const [submittingComment, setSubmittingComment] = useState(false)
+  const [commentPreview, setCommentPreview] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const commentRef = useRef<HTMLTextAreaElement>(null)
+  const [ticket, setTicket] = useState<Ticket | null>(null)
+  const [creatingTicket, setCreatingTicket] = useState(false)
   const eventLimit = 25
 
   useEffect(() => {
@@ -60,6 +68,7 @@ export default function IssueDetail() {
       api.listUsers().then(setUsers),
       api.listIssueTags(projectId, issueId).then(setIssueTags),
       api.listComments(projectId, issueId).then(setComments),
+      api.getTicketByIssue(projectId, issueId).then(r => { if (r.ticket) setTicket(r.ticket) }).catch(() => {}),
     ]).finally(() => setLoading(false))
   }, [projectId, issueId])
 
@@ -98,6 +107,73 @@ export default function IssueDetail() {
       toast.error(e instanceof Error ? e.message : 'Failed to create Jira ticket')
     } finally {
       setCreatingJira(false)
+    }
+  }
+
+  const handleCreateTicket = async () => {
+    if (!projectId || !issueId) return
+    setCreatingTicket(true)
+    try {
+      const t = await api.createTicket(projectId, issueId)
+      setTicket(t)
+      toast.success('Ticket created')
+      navigate(`/projects/${projectId}/tickets/${t.id}`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create ticket')
+    } finally {
+      setCreatingTicket(false)
+    }
+  }
+
+  const mentionUsers = useMemo(() => {
+    if (mentionQuery === null) return []
+    const q = mentionQuery.toLowerCase()
+    return users.filter(u => (u.name || u.email).toLowerCase().includes(q)).slice(0, 5)
+  }, [mentionQuery, users])
+
+  const handleCommentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value
+    setCommentBody(val)
+    // Detect @mention trigger
+    const pos = e.target.selectionStart
+    const before = val.slice(0, pos)
+    const match = before.match(/@([\w.-]*)$/)
+    if (match) {
+      setMentionQuery(match[1])
+      setMentionIndex(0)
+    } else {
+      setMentionQuery(null)
+    }
+  }
+
+  const insertMention = (user: User) => {
+    const textarea = commentRef.current
+    if (!textarea) return
+    const pos = textarea.selectionStart
+    const before = commentBody.slice(0, pos)
+    const after = commentBody.slice(pos)
+    const mentionStart = before.lastIndexOf('@')
+    const handle = user.email.split('@')[0] // use email prefix as handle
+    const newBody = before.slice(0, mentionStart) + `@${handle} ` + after
+    setCommentBody(newBody)
+    setMentionQuery(null)
+    textarea.focus()
+  }
+
+  const handleCommentKeyDown = (e: React.KeyboardEvent) => {
+    if (mentionQuery !== null && mentionUsers.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIndex(i => Math.min(i + 1, mentionUsers.length - 1))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIndex(i => Math.max(i - 1, 0))
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        insertMention(mentionUsers[mentionIndex])
+      } else if (e.key === 'Escape') {
+        setMentionQuery(null)
+      }
     }
   }
 
@@ -350,6 +426,18 @@ export default function IssueDetail() {
               </Button>
             </a>
           )}
+          {project?.workflow_mode === 'managed' && !ticket && (
+            <Button size="sm" variant="default" onClick={handleCreateTicket} disabled={creatingTicket}>
+              {creatingTicket ? 'Creating...' : 'Manage'}
+            </Button>
+          )}
+          {ticket && (
+            <Link to={`/projects/${projectId}/tickets/${ticket.id}`}>
+              <Button size="sm" variant="outline">
+                View ticket
+              </Button>
+            </Link>
+          )}
           <Button
             size="sm"
             variant={followed ? 'default' : 'outline'}
@@ -474,7 +562,9 @@ export default function IssueDetail() {
                   </div>
                 </div>
               ) : (
-                <p className="text-sm whitespace-pre-wrap">{c.body}</p>
+                <div className="text-sm prose prose-sm prose-invert max-w-none [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs [&_a]:text-primary [&_p]:my-1">
+                  <Markdown remarkPlugins={[remarkGfm]}>{c.body.replace(/@([\w.-]+)/g, '**@$1**')}</Markdown>
+                </div>
               )}
               {editingComment !== c.id && (currentUser?.id === c.user_id || currentUser?.role === 'admin') && (
                 <div className="flex gap-2 mt-1">
@@ -526,12 +616,49 @@ export default function IssueDetail() {
               </div>
             )}
           </div>
-          <textarea
-            value={commentBody}
-            onChange={e => setCommentBody(e.target.value)}
-            placeholder="Add a comment..."
-            className="flex-1 text-sm rounded-md border border-border bg-background px-3 py-2 min-h-[60px] resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50"
-          />
+          <div className="flex-1">
+            {commentPreview ? (
+              <div className="text-sm prose prose-sm prose-invert max-w-none rounded-md border border-border bg-background px-3 py-2 min-h-[60px] [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs [&_a]:text-primary [&_p]:my-1">
+                <Markdown remarkPlugins={[remarkGfm]}>{commentBody || '*Nothing to preview*'}</Markdown>
+              </div>
+            ) : (
+              <div className="relative">
+                <textarea
+                  ref={commentRef}
+                  value={commentBody}
+                  onChange={handleCommentChange}
+                  onKeyDown={handleCommentKeyDown}
+                  placeholder="Add a comment... (supports Markdown, @mention users)"
+                  className="w-full text-sm rounded-md border border-border bg-background px-3 py-2 min-h-[60px] resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50"
+                />
+                {mentionQuery !== null && mentionUsers.length > 0 && (
+                  <div className="absolute bottom-full left-0 mb-1 w-56 rounded-md border bg-popover shadow-lg z-50">
+                    {mentionUsers.map((u, i) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        className={cn(
+                          'w-full text-left px-3 py-1.5 text-sm hover:bg-accent',
+                          i === mentionIndex && 'bg-accent'
+                        )}
+                        onMouseDown={e => { e.preventDefault(); insertMention(u) }}
+                      >
+                        <span className="font-medium">{u.name || u.email}</span>
+                        {u.name && <span className="text-xs text-muted-foreground ml-1">{u.email}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setCommentPreview(!commentPreview)}
+              className="text-xs text-muted-foreground hover:text-foreground mt-1 transition-colors"
+            >
+              {commentPreview ? 'Edit' : 'Preview'}
+            </button>
+          </div>
           <Button type="submit" size="sm" disabled={!commentBody.trim() || submittingComment} className="mt-0.5">
             <Send className="h-4 w-4" />
           </Button>

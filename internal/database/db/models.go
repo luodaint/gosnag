@@ -102,6 +102,18 @@ type Issue struct {
 	GithubIssueUrl       sql.NullString `json:"github_issue_url"`
 }
 
+type IssueActivity struct {
+	ID        uuid.UUID             `json:"id"`
+	IssueID   uuid.UUID             `json:"issue_id"`
+	TicketID  uuid.NullUUID         `json:"ticket_id"`
+	UserID    uuid.NullUUID         `json:"user_id"`
+	Action    string                `json:"action"`
+	OldValue  sql.NullString        `json:"old_value"`
+	NewValue  sql.NullString        `json:"new_value"`
+	Metadata  pqtype.NullRawMessage `json:"metadata"`
+	CreatedAt time.Time             `json:"created_at"`
+}
+
 type IssueAlias struct {
 	ID             uuid.UUID `json:"id"`
 	ProjectID      uuid.UUID `json:"project_id"`
@@ -187,6 +199,7 @@ type Project struct {
 	GithubOwner            string        `json:"github_owner"`
 	GithubRepo             string        `json:"github_repo"`
 	GithubLabels           string        `json:"github_labels"`
+	WorkflowMode           string        `json:"workflow_mode"`
 }
 
 type ProjectFavorite struct {
@@ -243,6 +256,27 @@ type TagRule struct {
 	CreatedAt  time.Time             `json:"created_at"`
 	UpdatedAt  time.Time             `json:"updated_at"`
 	Conditions pqtype.NullRawMessage `json:"conditions"`
+}
+
+type Ticket struct {
+	ID              uuid.UUID      `json:"id"`
+	IssueID         uuid.UUID      `json:"issue_id"`
+	ProjectID       uuid.UUID      `json:"project_id"`
+	Status          string         `json:"status"`
+	AssignedTo      uuid.NullUUID  `json:"assigned_to"`
+	CreatedBy       uuid.UUID      `json:"created_by"`
+	Priority        int32          `json:"priority"`
+	DueDate         sql.NullTime   `json:"due_date"`
+	ResolutionType  sql.NullString `json:"resolution_type"`
+	ResolutionNotes sql.NullString `json:"resolution_notes"`
+	FixReference    sql.NullString `json:"fix_reference"`
+	Title           string         `json:"title"`
+	Description     string         `json:"description"`
+	EscalatedSystem sql.NullString `json:"escalated_system"`
+	EscalatedKey    sql.NullString `json:"escalated_key"`
+	EscalatedUrl    sql.NullString `json:"escalated_url"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 type User struct {

@@ -36,3 +36,6 @@ RETURNING *;
 
 -- name: CountUsers :one
 SELECT count(*) FROM users;
+
+-- name: GetUserByNameOrEmail :one
+SELECT * FROM users WHERE (name = $1 OR email = $1) AND status = 'active';

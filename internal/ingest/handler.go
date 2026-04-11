@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/darkspock/gosnag/internal/activity"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -188,6 +189,10 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 	isNew := issue.EventCount == 1
 	reopened := false
 
+	if isNew {
+		activity.Record(ctx, h.queries, issue.ID, nil, nil, "first_seen", "", "open", nil)
+	}
+
 	// Check if we should reopen a resolved issue
 	if !isNew && issue.Status == "resolved" {
 		shouldReopen := false
@@ -213,6 +218,7 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 				slog.Error("failed to reopen issue", "error", err)
 			} else {
 				reopened = true
+				activity.Record(ctx, h.queries, issue.ID, nil, nil, "auto_reopened", "resolved", "reopened", nil)
 			}
 		}
 	}
@@ -229,6 +235,7 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 				slog.Error("failed to unsnooze issue", "error", err)
 			} else {
 				reopened = true
+				activity.Record(ctx, h.queries, issue.ID, nil, nil, "auto_unsnoozed", "snoozed", "reopened", nil)
 			}
 		}
 	}

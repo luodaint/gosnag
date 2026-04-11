@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	activitypkg "github.com/darkspock/gosnag/internal/activity"
 	"github.com/darkspock/gosnag/internal/alert"
 	"github.com/darkspock/gosnag/internal/comment"
 	"github.com/darkspock/gosnag/internal/auth"
@@ -20,6 +21,7 @@ import (
 	"github.com/darkspock/gosnag/internal/github"
 	"github.com/darkspock/gosnag/internal/jira"
 	"github.com/darkspock/gosnag/internal/n1"
+	"github.com/darkspock/gosnag/internal/ticket"
 	"github.com/darkspock/gosnag/internal/priority"
 	"github.com/darkspock/gosnag/internal/project"
 	"github.com/darkspock/gosnag/internal/tags"
@@ -72,12 +74,19 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	alertHandler := alert.NewHandler(queries)
 	jiraHandler := jira.NewHandler(queries, cfg)
 	githubHandler := github.NewHandler(queries, cfg)
+	activityHandler := activitypkg.NewHandler(queries)
 	priorityHandler := priority.NewHandler(queries)
 	tagsHandler := tags.NewHandler(queries)
-	commentHandler := comment.NewHandler(queries)
 	oauthHandler := auth.NewOAuthHandler(queries, cfg)
 
 	alertService := alert.NewService(queries, cfg)
+
+	ticketHandler := ticket.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
+		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
+	})
+	commentHandler := comment.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
+		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
+	})
 	ingestHandler := ingest.NewHandler(queries,
 		func(projectID uuid.UUID, iss db.Issue, isNew bool) {
 			alertService.Notify(projectID, iss, isNew)
@@ -218,6 +227,9 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.Get("/tags", tagsHandler.ListIssueTags)
 				r.With(auth.RequireWritePermission).Post("/tags", tagsHandler.AddTag)
 				r.With(auth.RequireWritePermission).Delete("/tags", tagsHandler.RemoveTag)
+				r.Get("/activities", activityHandler.List)
+				r.Get("/ticket", ticketHandler.GetByIssue)
+				r.With(auth.RequireWritePermission).Post("/ticket", ticketHandler.Create)
 				r.With(auth.RequireWritePermission).Post("/jira", jiraHandler.CreateTicket)
 				r.With(auth.RequireWritePermission).Post("/github", githubHandler.CreateIssueHandler)
 				r.Post("/follow", issueHandler.Follow)
@@ -228,6 +240,17 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 					r.With(auth.RequireWritePermission).Put("/{comment_id}", commentHandler.Update)
 					r.With(auth.RequireWritePermission).Delete("/{comment_id}", commentHandler.Delete)
 				})
+			})
+		})
+
+		// Tickets (management layer)
+		r.Route("/projects/{project_id}/tickets", func(r chi.Router) {
+			r.Get("/", ticketHandler.List)
+			r.Get("/counts", ticketHandler.Counts)
+			r.Route("/{ticket_id}", func(r chi.Router) {
+				r.Get("/", ticketHandler.Get)
+				r.With(auth.RequireWritePermission).Put("/", ticketHandler.Update)
+				r.Get("/transitions", ticketHandler.Transitions)
 			})
 		})
 

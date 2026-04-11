@@ -6,6 +6,9 @@ import Login from '@/pages/Login'
 import Projects from '@/pages/Projects'
 import IssueList from '@/pages/IssueList'
 import IssueDetail from '@/pages/IssueDetail'
+import IssueBoard from '@/pages/IssueBoard'
+import TicketList from '@/pages/TicketList'
+import TicketDetail from '@/pages/TicketDetail'
 import ProjectSettings from '@/pages/ProjectSettings'
 import UserManagement from '@/pages/UserManagement'
 import AdminSettings from '@/pages/AdminSettings'
@@ -30,6 +33,9 @@ function AppRoutes() {
       >
         <Route path="/" element={<Projects />} />
         <Route path="/projects/:projectId" element={<IssueList />} />
+        <Route path="/projects/:projectId/board" element={<IssueBoard />} />
+        <Route path="/projects/:projectId/tickets" element={<TicketList />} />
+        <Route path="/projects/:projectId/tickets/:ticketId" element={<TicketDetail />} />
         <Route path="/projects/:projectId/issues/:issueId" element={<IssueDetail />} />
         <Route path="/projects/:projectId/settings" element={<ProjectSettings />} />
         <Route path="/users" element={<UserManagement />} />

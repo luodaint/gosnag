@@ -243,6 +243,83 @@ server.tool("list_users", "List all users", {}, async () => {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 });
 
+// --- Tickets ---
+
+server.tool(
+  "create_ticket",
+  "Create a management ticket for an issue (starts workflow). Requires managed workflow mode on the project.",
+  { project_id: z.string(), issue_id: z.string(), priority: z.number().optional() },
+  async ({ project_id, issue_id, priority }) => {
+    const data = await api(`/projects/${project_id}/issues/${issue_id}/ticket`, {
+      method: "POST",
+      body: JSON.stringify({ priority: priority || 50 }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_ticket",
+  "Get the ticket associated with an issue (returns null if no ticket exists)",
+  { project_id: z.string(), issue_id: z.string() },
+  async ({ project_id, issue_id }) => {
+    const data = await api(`/projects/${project_id}/issues/${issue_id}/ticket`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "update_ticket",
+  "Update a ticket's status, assignee, priority, or resolution. Valid statuses: acknowledged, in_progress, in_review, done, escalated. Transitions are validated.",
+  {
+    project_id: z.string(),
+    ticket_id: z.string(),
+    status: z.string().optional(),
+    assigned_to: z.string().optional(),
+    priority: z.number().optional(),
+    resolution_type: z.string().optional(),
+    resolution_notes: z.string().optional(),
+    fix_reference: z.string().optional(),
+  },
+  async ({ project_id, ticket_id, ...updates }) => {
+    const body: Record<string, unknown> = {};
+    if (updates.status) body.status = updates.status;
+    if (updates.assigned_to !== undefined) body.assigned_to = updates.assigned_to;
+    if (updates.priority !== undefined) body.priority = updates.priority;
+    if (updates.resolution_type) body.resolution_type = updates.resolution_type;
+    if (updates.resolution_notes) body.resolution_notes = updates.resolution_notes;
+    if (updates.fix_reference) body.fix_reference = updates.fix_reference;
+    const data = await api(`/projects/${project_id}/tickets/${ticket_id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "list_tickets",
+  "List tickets for a project (for board view). Filter by status: acknowledged, in_progress, in_review, done, escalated.",
+  { project_id: z.string(), status: z.string().optional(), limit: z.number().optional() },
+  async ({ project_id, status, limit }) => {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (limit) params.set("limit", String(limit));
+    const data = await api(`/projects/${project_id}/tickets?${params}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_ticket_counts",
+  "Get ticket counts by status for a project",
+  { project_id: z.string() },
+  async ({ project_id }) => {
+    const data = await api(`/projects/${project_id}/tickets/counts`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
 // Start server
 async function main() {
   if (!GOSNAG_URL) {

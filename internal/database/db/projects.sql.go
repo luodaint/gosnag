@@ -15,7 +15,7 @@ import (
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (name, slug, default_cooldown_minutes)
 VALUES ($1, $2, $3)
-RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels
+RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode
 `
 
 type CreateProjectParams struct {
@@ -51,6 +51,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.GithubOwner,
 		&i.GithubRepo,
 		&i.GithubLabels,
+		&i.WorkflowMode,
 	)
 	return i, err
 }
@@ -97,7 +98,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id uuid.UUID) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels FROM projects WHERE id = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode FROM projects WHERE id = $1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error) {
@@ -127,12 +128,13 @@ func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error)
 		&i.GithubOwner,
 		&i.GithubRepo,
 		&i.GithubLabels,
+		&i.WorkflowMode,
 	)
 	return i, err
 }
 
 const getProjectByNumericID = `-- name: GetProjectByNumericID :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels FROM projects WHERE numeric_id = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode FROM projects WHERE numeric_id = $1
 `
 
 func (q *Queries) GetProjectByNumericID(ctx context.Context, numericID int32) (Project, error) {
@@ -162,12 +164,13 @@ func (q *Queries) GetProjectByNumericID(ctx context.Context, numericID int32) (P
 		&i.GithubOwner,
 		&i.GithubRepo,
 		&i.GithubLabels,
+		&i.WorkflowMode,
 	)
 	return i, err
 }
 
 const getProjectBySlug = `-- name: GetProjectBySlug :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels FROM projects WHERE slug = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode FROM projects WHERE slug = $1
 `
 
 func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, error) {
@@ -197,6 +200,7 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, e
 		&i.GithubOwner,
 		&i.GithubRepo,
 		&i.GithubLabels,
+		&i.WorkflowMode,
 	)
 	return i, err
 }
@@ -414,7 +418,7 @@ func (q *Queries) ListProjectKeys(ctx context.Context, projectID uuid.UUID) ([]P
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels FROM projects ORDER BY position, created_at DESC
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode FROM projects ORDER BY position, created_at DESC
 `
 
 func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
@@ -450,6 +454,7 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.GithubOwner,
 			&i.GithubRepo,
 			&i.GithubLabels,
+			&i.WorkflowMode,
 		); err != nil {
 			return nil, err
 		}
@@ -472,9 +477,10 @@ SET name = $2, slug = $3, default_cooldown_minutes = $4, warning_as_error = $5,
     icon = $12, color = $13,
     issue_display_mode = $14,
     github_token = $15, github_owner = $16, github_repo = $17, github_labels = $18,
+    workflow_mode = $19,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels
+RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode
 `
 
 type UpdateProjectParams struct {
@@ -496,6 +502,7 @@ type UpdateProjectParams struct {
 	GithubOwner            string    `json:"github_owner"`
 	GithubRepo             string    `json:"github_repo"`
 	GithubLabels           string    `json:"github_labels"`
+	WorkflowMode           string    `json:"workflow_mode"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
@@ -518,6 +525,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.GithubOwner,
 		arg.GithubRepo,
 		arg.GithubLabels,
+		arg.WorkflowMode,
 	)
 	var i Project
 	err := row.Scan(
@@ -544,6 +552,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.GithubOwner,
 		&i.GithubRepo,
 		&i.GithubLabels,
+		&i.WorkflowMode,
 	)
 	return i, err
 }
