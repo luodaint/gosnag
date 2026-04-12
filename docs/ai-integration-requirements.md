@@ -23,6 +23,7 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 - Natural language search
 - AI code fix suggestions or auto-generated PRs
 - Multi-provider fallback chains
+- Per-feature provider selection (e.g., Groq for merge, OpenAI for RCA). One global provider for all features. The epic's recommendation about mixing providers is aspirational — may be revisited in a future iteration.
 
 ---
 
@@ -81,7 +82,7 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ### 2.3 Configuration
 
-**REQ-AI-020**: Global AI configuration via environment variables:
+**REQ-AI-020**: Global AI configuration via environment variables only (no admin UI for provider config):
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
@@ -106,9 +107,10 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 |-------|------|---------|-------------|
 | `ai_enabled` | boolean | false | Master toggle |
 | `ai_model` | string | "" | Override global model |
-| `ai_auto_merge` | boolean | false | Auto-merge duplicates without user confirmation |
+| `ai_merge_suggestions` | boolean | false | Evaluate new issues for duplicates and show merge suggestion banners |
+| `ai_auto_merge` | boolean | false | Auto-merge duplicates without user confirmation (requires `ai_merge_suggestions = true`) |
 | `ai_anomaly_detection` | boolean | false | Run post-deploy anomaly analysis |
-| `ai_ticket_description` | boolean | true | Auto-generate ticket descriptions |
+| `ai_ticket_description` | boolean | true | Show "Generate description" button on tickets |
 | `ai_root_cause` | boolean | false | Enable root cause analysis button |
 | `ai_triage` | boolean | false | Show triage suggestions |
 
@@ -122,17 +124,19 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 **REQ-AI-041**: If a project exceeds its daily token budget (`AI_MAX_TOKENS_PER_DAY`), all AI features for that project MUST be paused until the next calendar day (UTC).
 
-**REQ-AI-042**: The system MUST rate-limit AI calls to `AI_MAX_CALLS_PER_MINUTE` per project. Calls exceeding the limit MUST be dropped silently (no error to the user for background features) or return a user-facing message for on-demand features.
+**REQ-AI-042**: The system MUST rate-limit AI calls to `AI_MAX_CALLS_PER_MINUTE` per project. Rate limiting is DB-based: query `ai_usage_log` count in the last 60 seconds for the project. Calls exceeding the limit MUST be dropped silently (no error to the user for background features) or return a user-facing message for on-demand features.
 
-**REQ-AI-043**: The system SHOULD cache identical prompts within a 5-minute window and return the cached response.
+**REQ-AI-043**: The system SHOULD cache identical prompts within a 5-minute window and return the cached response. Caching is hash-based: store a prompt hash + response in `ai_usage_log`, check before calling the provider.
 
 ### 2.6 Audit
 
-**REQ-AI-050**: Each AI call MUST be logged with: project ID, feature name, model used, input token count, output token count, timestamp, latency (ms).
+**REQ-AI-050**: Each AI call MUST be logged in the `ai_usage_log` table with: project ID, feature name, model used, input token count, output token count, timestamp, latency (ms), prompt hash, cached response (for prompt caching).
 
-**REQ-AI-051**: The system MUST NOT log the full prompt or response content. Only metadata.
+> This single table serves three purposes: audit logging, token budget tracking (REQ-AI-040/041), and rate limiting (REQ-AI-042 — query count in last 60s per project).
 
-**REQ-AI-052**: Token usage MUST be visible in Project Settings → AI section (today's usage, this week's usage).
+**REQ-AI-051**: The system MUST NOT log the full prompt or response content. Only metadata. Exception: cached responses are stored for the 5-minute cache window (REQ-AI-043).
+
+**REQ-AI-052**: Token usage MUST be visible in Project Settings → AI section (today's usage, this week's usage). No separate AI dashboard for now — the `ai_usage_log` table has raw data for future dashboards.
 
 ---
 
@@ -140,13 +144,13 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ### 3.1 Trigger
 
-**REQ-MERGE-001**: When a new issue is created (first event with a new fingerprint), IF the project has `ai_enabled = true` AND `ai_auto_merge = true` OR the feature is enabled for suggestions, the system MUST evaluate the issue for potential duplicates.
+**REQ-MERGE-001**: The system MUST run a periodic batch job (every 5 minutes) that checks for new issues since the last run. For each project with `ai_enabled = true` AND `ai_merge_suggestions = true`, it MUST evaluate new issues for potential duplicates. The job MUST NOT run if there are no new issues since the last check.
 
-**REQ-MERGE-002**: The evaluation MUST run asynchronously (goroutine) after event ingestion completes. It MUST NOT block the ingest response.
+**REQ-MERGE-002**: The batch job runs as a background goroutine. It MUST NOT block any request or ingestion flow.
 
 ### 3.2 Input
 
-**REQ-MERGE-010**: The system MUST fetch up to 10 open issues in the same project, ordered by last_seen DESC, including their latest event's stack trace (top 5 frames).
+**REQ-MERGE-010**: The system MUST fetch up to 10 open issues in the same project, ordered by last_seen DESC, including their latest event's stack trace (top 5 frames). Issues that already have a pending merge suggestion (as source or target) MUST be excluded from candidates.
 
 **REQ-MERGE-011**: The system MUST send the new issue's title, stack trace (top 5 frames), level, and platform, alongside the candidate issues, to the AI provider.
 
@@ -197,7 +201,7 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ### 4.1 Trigger
 
-**REQ-DEPLOY-001**: When a deploy is recorded (`POST /projects/{id}/deploys`), IF the project has `ai_enabled = true` AND `ai_anomaly_detection = true`, the system MUST schedule an analysis to run 15 minutes after the deploy timestamp.
+**REQ-DEPLOY-001**: When a deploy is recorded (`POST /projects/{id}/deploys`), IF the project has `ai_enabled = true` AND `ai_anomaly_detection = true`, the system MUST schedule an analysis to run 15 minutes after the deploy timestamp. If a new deploy is recorded while a previous analysis is still pending, the previous analysis MUST be cancelled.
 
 **REQ-DEPLOY-002**: The analysis MUST run as a background worker, not blocking any request.
 
@@ -261,11 +265,11 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ### 5.1 Trigger
 
-**REQ-DESC-001**: When a ticket is created from an issue (via "Manage" button), IF the project has `ai_enabled = true` AND `ai_ticket_description = true`, the system MUST automatically generate a description.
+**REQ-DESC-001**: AI description generation is on-demand. The user clicks a "Generate description" button on the ticket detail page. The system checks `ai_enabled = true` AND `ai_ticket_description = true` before executing.
 
-**REQ-DESC-002**: The generation MUST happen asynchronously. The ticket is created immediately with an empty description. The frontend polls or uses a callback to fill the description when ready.
+**REQ-DESC-002**: The generation is synchronous: the API call blocks until the AI responds (up to 30s timeout), then returns the generated HTML directly. The frontend fills the WYSIWYG editor with the response.
 
-**REQ-DESC-003**: For manually created tickets (no linked issue), the system MUST NOT auto-generate a description.
+**REQ-DESC-003**: The "Generate description" button MUST be available on tickets linked to an issue (the issue provides context for generation). For manually created tickets with no linked issue, the button SHOULD still be available but will use only the ticket title and any existing description as context.
 
 ### 5.2 Input
 
@@ -281,7 +285,7 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ### 5.3 Output
 
-**REQ-DESC-020**: The AI response MUST be formatted as HTML (to be inserted into the WYSIWYG editor).
+**REQ-DESC-020**: The AI response MUST be formatted as HTML (to be inserted into the WYSIWYG editor). The backend MUST sanitize the HTML before returning it — strip `<script>`, `<iframe>`, `on*` event attributes, and any other XSS vectors. Use an allowlist of safe tags (`p`, `h1`-`h3`, `ul`, `ol`, `li`, `strong`, `em`, `code`, `pre`, `a`, `br`, `blockquote`, `table`, `thead`, `tbody`, `tr`, `th`, `td`).
 
 **REQ-DESC-021**: The description MUST include:
 - A summary of the error
@@ -289,20 +293,20 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 - Impact assessment (event count, user count, frequency)
 - Suggested investigation steps
 
-**REQ-DESC-022**: The generated description MUST be saved to the ticket's `description` field via the existing update API.
+**REQ-DESC-022**: The generated description is returned to the frontend, NOT auto-saved. The user reviews and edits it in the WYSIWYG editor, then saves via the normal ticket update flow. The API endpoint returns the HTML content directly; it does NOT write to the database.
 
 ### 5.4 UI
 
-**REQ-DESC-030**: After ticket creation from an issue, the ticket detail page MUST show a loading indicator while the description is being generated.
+**REQ-DESC-030**: The ticket detail page MUST show a "Generate description" button when AI is enabled for the project. Clicking the button shows a loading state while the AI generates the description.
 
 **REQ-DESC-031**: Once generated, the description MUST appear in the WYSIWYG editor, editable by the user.
 
-**REQ-DESC-032**: If the ticket has an empty description AND is linked to an issue, a "Generate description" button MUST be visible.
+**REQ-DESC-032**: If the ticket already has a description, the button label SHOULD change to "Regenerate description" and the new content replaces the existing description in the editor (user can undo via editor).
 
 ### 5.5 API
 
-**REQ-DESC-040**: `POST /projects/{id}/tickets/{id}/generate-description` — triggers AI description generation. Returns `{ status: "generating" }`.
-**REQ-DESC-041**: The generation result is saved directly to the ticket. The frontend refreshes the ticket to see the updated description.
+**REQ-DESC-040**: `POST /projects/{id}/tickets/{id}/generate-description` — triggers AI description generation. Returns the generated HTML directly: `{ description: "<html content>" }`. Synchronous call (up to 30s).
+**REQ-DESC-041**: The frontend receives the description in the response and fills the WYSIWYG editor. The description is NOT auto-saved — the user reviews and saves via the normal ticket update flow.
 
 ---
 
@@ -310,7 +314,7 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ### 6.1 Trigger
 
-**REQ-RCA-001**: Root cause analysis is on-demand only. The user clicks "Analyze" on an issue detail or ticket detail page.
+**REQ-RCA-001**: Root cause analysis is on-demand only. The user clicks "Analyze" on an issue detail page. On the ticket detail page, the "Analyze" button is available only if the ticket is linked to an issue — it triggers analysis on the linked issue and displays the result.
 
 **REQ-RCA-002**: The system MUST check `ai_enabled = true` AND `ai_root_cause = true` before executing.
 
@@ -326,12 +330,14 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ### 6.3 Output
 
-**REQ-RCA-020**: The AI response MUST include:
-- Summary (1–2 sentences)
-- Evidence list (what data supports the conclusion)
-- Suggested fix (actionable steps)
+**REQ-RCA-020**: The AI MUST return a JSON response with three fields:
+- `summary` (string): 1–2 sentence conclusion
+- `evidence` (array of strings): what data supports the conclusion
+- `suggested_fix` (string): actionable steps in Markdown format
 
-**REQ-RCA-021**: The analysis MUST be stored and displayed. It MUST NOT be regenerated on every page load.
+This is the **canonical format**. Storage uses dedicated columns matching these fields (`ai_analyses` table). The UI renders each field as a labeled section using Markdown rendering (same `react-markdown` + `remark-gfm` already used in comments).
+
+**REQ-RCA-021**: The analysis MUST be stored and displayed. It MUST NOT be regenerated on every page load. Analyses are versioned — regenerating creates a new entry (incrementing `version`), preserving history.
 
 ### 6.4 UI
 
@@ -343,8 +349,9 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ### 6.5 API
 
-**REQ-RCA-040**: `POST /projects/{id}/issues/{id}/analyze` — triggers analysis. Returns the analysis.
+**REQ-RCA-040**: `POST /projects/{id}/issues/{id}/analyze` — triggers analysis. Returns the new analysis.
 **REQ-RCA-041**: `GET /projects/{id}/issues/{id}/analysis` — returns the latest stored analysis or null.
+**REQ-RCA-042**: `GET /projects/{id}/issues/{id}/analyses` — returns all stored analyses for the issue, ordered by created_at DESC (version history).
 
 ---
 
@@ -402,15 +409,7 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ### 8.2 Admin Settings — AI Provider
 
-**REQ-UI-010**: The Admin Settings page MUST have an "AI Provider" section with:
-- Provider dropdown (OpenAI, Groq, Bedrock, Claude, Ollama)
-- API key input (password field, shows "configured" when set)
-- Model input
-- Base URL input (for Ollama/proxies)
-- Bedrock-specific: region, model ID (shown only when provider = bedrock)
-- Daily token budget input
-- Rate limit input
-- "Test Connection" button: sends a simple prompt and verifies the provider responds
+> **OUT OF SCOPE** — Provider configuration is via environment variables only (REQ-AI-020). An admin UI for provider settings may be added in a future iteration.
 
 ---
 
@@ -434,13 +433,86 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 **REQ-PRIV-002**: With Ollama provider, no data leaves the GoSnag instance. The system MUST document this clearly in the settings UI.
 
-**REQ-PRIV-003**: The system SHOULD offer a PII stripping option that removes email addresses and IP addresses from prompts before sending to external providers.
+**REQ-PRIV-003**: The system SHOULD offer a PII stripping option that removes email addresses and IP addresses from prompts before sending to external providers. **Deferred to Phase 3.** This is an accepted risk — stack traces, breadcrumbs, and request context may contain personal data when sent to external providers.
 
 **REQ-PRIV-004**: API keys MUST never be returned in API responses. Use the `_set` boolean pattern.
 
 ---
 
-## 11. Testing
+## 11. Additional Data Models
+
+> These tables were identified as missing during validation and added here.
+
+### 11.1 AI Usage Log (Audit + Token Tracking + Rate Limiting + Cache)
+
+**REQ-DATA-001**: New table `ai_usage_log`:
+- id (UUID, PK)
+- project_id (UUID, FK → projects, ON DELETE CASCADE)
+- feature (TEXT) — 'auto_merge', 'description', 'rca', 'anomaly', 'triage'
+- model (TEXT) — model name used
+- input_tokens (INT)
+- output_tokens (INT)
+- latency_ms (INT)
+- prompt_hash (TEXT, nullable) — SHA-256 hash for caching
+- cached_response (TEXT, nullable) — cached AI response (cleared after 5 min)
+- created_at (TIMESTAMPTZ)
+
+Indexes:
+- `idx_ai_usage_log_project_day` ON (project_id, created_at) — for daily token budget queries
+- `idx_ai_usage_log_prompt_hash` ON (project_id, prompt_hash, created_at) — for cache lookups
+
+**REQ-DATA-002**: Operational rules for `ai_usage_log`:
+- **Cache hits**: When a cached response is returned, a new row is logged with `input_tokens = 0`, `output_tokens = 0`, `latency_ms = 0`. Cache hits do NOT count against the daily token budget but DO count against the rate limit (to prevent abuse).
+- **Failed calls**: Logged with `input_tokens = 0`, `output_tokens = 0` and the actual `latency_ms`. Failures count against the rate limit (to prevent retry storms) but NOT against the token budget.
+- **Cache cleanup**: A background goroutine MUST clear `cached_response` values older than 5 minutes (set to NULL). This runs periodically (e.g., every minute) to prevent unbounded storage growth.
+- **Log retention**: `ai_usage_log` rows are kept indefinitely for audit purposes. The `cached_response` column is the only one that gets cleaned.
+
+### 11.2 AI Analyses (Root Cause Analysis — Versioned)
+
+**REQ-DATA-010**: New table `ai_analyses`:
+- id (UUID, PK)
+- issue_id (UUID, FK → issues, ON DELETE CASCADE)
+- project_id (UUID, FK → projects, ON DELETE CASCADE)
+- summary (TEXT)
+- evidence (TEXT) — JSON array of evidence items
+- suggested_fix (TEXT)
+- model (TEXT) — model used
+- version (INT) — incremented on each regeneration
+- created_at (TIMESTAMPTZ)
+
+Index:
+- `idx_ai_analyses_issue` ON (issue_id, created_at DESC) — for fetching latest/all
+
+### 11.3 AI Triage Suggestions (Phase 3)
+
+**REQ-DATA-020**: New table `ai_triage_suggestions` (Phase 3):
+- id (UUID, PK)
+- issue_id (UUID, FK → issues, ON DELETE CASCADE, UNIQUE)
+- project_id (UUID, FK → projects, ON DELETE CASCADE)
+- suggested_assignee_id (UUID, nullable, FK → users)
+- assignee_reason (TEXT)
+- suggested_priority (INT)
+- priority_reason (TEXT)
+- status (TEXT: 'pending', 'applied', 'dismissed')
+- created_at (TIMESTAMPTZ)
+
+---
+
+## 12. Risks
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| PII sent to external AI providers | High (privacy) | Medium | PII stripping planned for Phase 3; Ollama keeps data local; AI is opt-in per project |
+| XSS via AI-generated HTML | High (security) | Low | Backend HTML sanitization with tag allowlist (REQ-DESC-020) |
+| AI provider outage blocks on-demand features | Medium (UX) | Low | 30s timeout, graceful fallback to no-AI behavior (REQ-ERR-001) |
+| Token budget exhaustion on high-volume projects | Medium (features paused) | Medium | Configurable budget, batch job pattern limits calls, project settings show usage |
+| Auto-merge false positive | High (data integrity) | Low | Confidence threshold 0.8, manual-accept mode available, merge can be undone |
+
+---
+
+## 13. Testing
+
+> Section renumbered from 11 to 13 after adding sections 11 (Data Models) and 12 (Risks).
 
 **REQ-TEST-001**: Each provider implementation MUST have unit tests that verify request construction and response parsing using a mock HTTP server.
 
@@ -450,14 +522,14 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ---
 
-## 12. Implementation Phases
+## 14. Implementation Phases
 
 ### Phase 1 (MVP)
 - AI provider interface + OpenAI + Groq + Bedrock implementations
-- Global config (env vars) + per-project settings (DB + UI)
-- Token tracking and rate limiting
-- AI ticket description generation
-- Auto-merge suggestions (manual accept only, no auto-merge yet)
+- Global config (env vars) + per-project settings (DB + UI, including `ai_merge_suggestions` flag)
+- Token tracking, rate limiting, and `ai_usage_log` with cache + cleanup
+- AI ticket description generation (on-demand with HTML sanitization)
+- Auto-merge suggestions via batch job (`ai_merge_suggestions = true`, manual accept only, `ai_auto_merge` deferred to Phase 2)
 
 ### Phase 2
 - Auto-merge (automatic execution when `ai_auto_merge = true`)
@@ -472,14 +544,14 @@ Add AI capabilities to GoSnag for automated issue analysis, duplicate detection,
 
 ---
 
-## 13. Acceptance Criteria
+## 15. Acceptance Criteria
 
 | Feature | Acceptance Criteria |
 |---------|-------------------|
 | Provider infra | Can switch between OpenAI, Groq, and Bedrock by changing env var; all features work with each |
-| Ticket description | Clicking "Manage" on an issue generates a description within 10s that includes summary, root cause, and impact |
-| Auto-merge suggestion | New issue that is a clear duplicate shows a merge suggestion banner within 30s |
-| Auto-merge execution | With `ai_auto_merge = true`, the duplicate is merged automatically with activity log entry |
+| Ticket description | Clicking "Generate description" on a ticket produces a description within 10s that includes summary, root cause, and impact |
+| Auto-merge suggestion | New issue that is a clear duplicate shows a merge suggestion banner within 5 minutes (next batch cycle) |
+| Auto-merge execution | With `ai_auto_merge = true`, the duplicate is merged automatically within 5 minutes with activity log entry |
 | Deploy anomaly | 15 min after a deploy that introduces errors, an alert is sent with severity and recommendation |
 | Root cause analysis | Clicking "Analyze" generates a structured analysis within 15s |
 | Triage suggestion | New issue shows assignee and priority suggestions within 30s |
