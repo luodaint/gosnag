@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -16,6 +17,7 @@ import (
 // Storage abstracts file storage (local disk or S3).
 type Storage interface {
 	Put(ctx context.Context, filename string, contentType string, body io.Reader) (url string, err error)
+	Delete(ctx context.Context, url string) error
 }
 
 // LocalStorage stores files on local disk.
@@ -35,6 +37,16 @@ func (l *LocalStorage) Put(_ context.Context, filename, contentType string, body
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 	return l.BaseURL + "/uploads/" + filename, nil
+}
+
+func (l *LocalStorage) Delete(_ context.Context, fileURL string) error {
+	// Extract filename from URL: baseURL/uploads/filename
+	parts := strings.SplitAfter(fileURL, "/uploads/")
+	if len(parts) < 2 || parts[1] == "" {
+		return nil
+	}
+	filename := filepath.Base(parts[1])
+	return os.Remove(filepath.Join(l.Dir, filename))
 }
 
 // S3Storage stores files in an S3 bucket.
@@ -103,4 +115,27 @@ func (s *S3Storage) Put(ctx context.Context, filename, contentType string, body 
 		return s.cdnURL + "/" + filename, nil
 	}
 	return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key), nil
+}
+
+func (s *S3Storage) Delete(ctx context.Context, fileURL string) error {
+	// Extract filename from URL and reconstruct the S3 key
+	var filename string
+	if s.cdnURL != "" && strings.HasPrefix(fileURL, s.cdnURL) {
+		filename = strings.TrimPrefix(fileURL, s.cdnURL+"/")
+	} else {
+		// Parse from S3 URL: https://bucket.s3.amazonaws.com/prefix/filename
+		parts := strings.SplitAfter(fileURL, s.prefix)
+		if len(parts) >= 2 {
+			filename = parts[len(parts)-1]
+		}
+	}
+	if filename == "" {
+		return nil
+	}
+	key := s.prefix + filename
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	return err
 }

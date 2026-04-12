@@ -64,6 +64,31 @@ func (q *Queries) DeleteAttachment(ctx context.Context, arg DeleteAttachmentPara
 	return err
 }
 
+const getAttachment = `-- name: GetAttachment :one
+SELECT id, ticket_id, filename, url, content_type, size_bytes, uploaded_by, created_at FROM ticket_attachments WHERE id = $1 AND ticket_id = $2
+`
+
+type GetAttachmentParams struct {
+	ID       uuid.UUID `json:"id"`
+	TicketID uuid.UUID `json:"ticket_id"`
+}
+
+func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (TicketAttachment, error) {
+	row := q.db.QueryRowContext(ctx, getAttachment, arg.ID, arg.TicketID)
+	var i TicketAttachment
+	err := row.Scan(
+		&i.ID,
+		&i.TicketID,
+		&i.Filename,
+		&i.Url,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.UploadedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listAttachmentsByTicket = `-- name: ListAttachmentsByTicket :many
 SELECT a.id, a.ticket_id, a.filename, a.url, a.content_type, a.size_bytes, a.uploaded_by, a.created_at, u.name AS uploader_name, u.email AS uploader_email
 FROM ticket_attachments a

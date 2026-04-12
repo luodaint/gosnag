@@ -10,5 +10,8 @@ JOIN users u ON u.id = a.uploaded_by
 WHERE a.ticket_id = $1
 ORDER BY a.created_at;
 
+-- name: GetAttachment :one
+SELECT * FROM ticket_attachments WHERE id = $1 AND ticket_id = $2;
+
 -- name: DeleteAttachment :exec
 DELETE FROM ticket_attachments WHERE id = $1 AND ticket_id = $2;

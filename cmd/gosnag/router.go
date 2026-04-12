@@ -110,7 +110,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 
 	ticketHandler := ticket.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
 		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
-	})
+	}, uploadStorage)
 	commentHandler := comment.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
 		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
 	})
@@ -306,8 +306,8 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	// File uploads
 	r.Route("/api/v1/upload", func(r chi.Router) {
 		r.Use(auth.MiddlewareWithToken(queries, cfg.BaseURL))
-		r.Post("/", uploadHandler.Upload)
-		r.Post("/doc", uploadHandler.UploadDoc)
+		r.With(auth.RequireWritePermission).Post("/", uploadHandler.Upload)
+		r.With(auth.RequireWritePermission).Post("/doc", uploadHandler.UploadDoc)
 	})
 
 	// Serve uploaded files with safe headers

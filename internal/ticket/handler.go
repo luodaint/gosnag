@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -19,13 +20,23 @@ import (
 // NotifyFunc is called to notify followers of changes.
 type NotifyFunc func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID)
 
-type Handler struct {
-	queries  *db.Queries
-	notifyFn NotifyFunc
+// FileDeleter can delete a stored file by URL.
+type FileDeleter interface {
+	Delete(ctx context.Context, url string) error
 }
 
-func NewHandler(queries *db.Queries, notifyFn NotifyFunc) *Handler {
-	return &Handler{queries: queries, notifyFn: notifyFn}
+type Handler struct {
+	queries     *db.Queries
+	notifyFn    NotifyFunc
+	fileDeleter FileDeleter
+}
+
+func NewHandler(queries *db.Queries, notifyFn NotifyFunc, fileDeleter ...FileDeleter) *Handler {
+	h := &Handler{queries: queries, notifyFn: notifyFn}
+	if len(fileDeleter) > 0 {
+		h.fileDeleter = fileDeleter[0]
+	}
+	return h
 }
 
 // Create creates a ticket for an issue.
