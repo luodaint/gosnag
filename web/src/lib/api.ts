@@ -224,6 +224,10 @@ export const api = {
     request<{ ok: boolean; error?: string }>(`/projects/${projectId}/repo/test`, { method: 'POST' }),
   getSuspectCommits: (projectId: string, issueId: string) =>
     request<{ commits: SuspectCommit[] }>(`/projects/${projectId}/issues/${issueId}/suspect-commits`),
+  getReleaseInfo: (projectId: string, issueId: string) =>
+    request<ReleaseInfo>(`/projects/${projectId}/issues/${issueId}/release-info`),
+  listDeploys: (projectId: string) =>
+    request<Deploy[]>(`/projects/${projectId}/deploys`),
 
   // Uploads
   uploadImage: async (file: File): Promise<string> => {
@@ -561,6 +565,26 @@ export interface SuspectCommit {
   timestamp: string
   url: string
   files: string[]
+}
+
+export interface ReleaseInfo {
+  first_release: string
+  commit_sha?: string
+  commit_url?: string
+  previous_release?: string
+  diff_url?: string
+  deployed_at?: string
+  deploy_environment?: string
+}
+
+export interface Deploy {
+  id: string
+  project_id: string
+  release_version: string
+  commit_sha: string | null
+  environment: string
+  url: string | null
+  deployed_at: string
 }
 
 export interface AlertConfig {

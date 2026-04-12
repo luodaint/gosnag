@@ -184,6 +184,10 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 
 				// Source code repository
 				r.With(auth.RequireAdmin).Post("/repo/test", sourceCodeHandler.TestConnection)
+
+				// Deploys
+				r.Get("/deploys", sourceCodeHandler.ListDeploys)
+				r.Post("/deploys", sourceCodeHandler.Deploy)
 				r.Route("/github/rules", func(r chi.Router) {
 					r.Get("/", githubHandler.ListRules)
 					r.With(auth.RequireAdmin).Post("/", githubHandler.CreateRule)
@@ -236,6 +240,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.With(auth.RequireWritePermission).Delete("/tags", tagsHandler.RemoveTag)
 				r.Get("/activities", activityHandler.List)
 				r.Get("/suspect-commits", sourceCodeHandler.SuspectCommits)
+				r.Get("/release-info", sourceCodeHandler.GetReleaseInfo)
 				r.Get("/ticket", ticketHandler.GetByIssue)
 				r.With(auth.RequireWritePermission).Post("/ticket", ticketHandler.Create)
 				r.With(auth.RequireWritePermission).Post("/jira", jiraHandler.CreateTicket)

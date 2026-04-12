@@ -42,6 +42,17 @@ type ApiToken struct {
 	Scope      string        `json:"scope"`
 }
 
+type Deploy struct {
+	ID             uuid.UUID      `json:"id"`
+	ProjectID      uuid.UUID      `json:"project_id"`
+	ReleaseVersion string         `json:"release_version"`
+	CommitSha      sql.NullString `json:"commit_sha"`
+	Environment    string         `json:"environment"`
+	Url            sql.NullString `json:"url"`
+	DeployedAt     time.Time      `json:"deployed_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
 type Event struct {
 	ID             uuid.UUID       `json:"id"`
 	IssueID        uuid.UUID       `json:"issue_id"`
@@ -242,6 +253,16 @@ type QueryPattern struct {
 	TotalExecMs     float64   `json:"total_exec_ms"`
 	FirstSeen       time.Time `json:"first_seen"`
 	LastSeen        time.Time `json:"last_seen"`
+}
+
+type ReleaseCommit struct {
+	ID             uuid.UUID      `json:"id"`
+	ProjectID      uuid.UUID      `json:"project_id"`
+	ReleaseVersion string         `json:"release_version"`
+	CommitSha      string         `json:"commit_sha"`
+	CommitUrl      sql.NullString `json:"commit_url"`
+	CommittedAt    sql.NullTime   `json:"committed_at"`
+	CreatedAt      time.Time      `json:"created_at"`
 }
 
 type Session struct {

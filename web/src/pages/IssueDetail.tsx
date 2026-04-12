@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/lib/use-auth'
-import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket, type SuspectCommit } from '@/lib/api'
+import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket, type SuspectCommit, type ReleaseInfo } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
@@ -55,6 +55,7 @@ export default function IssueDetail() {
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [creatingTicket, setCreatingTicket] = useState(false)
   const [suspectCommits, setSuspectCommits] = useState<SuspectCommit[]>([])
+  const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null)
   const eventLimit = 25
 
   useEffect(() => {
@@ -71,6 +72,7 @@ export default function IssueDetail() {
       api.listComments(projectId, issueId).then(setComments),
       api.getTicketByIssue(projectId, issueId).then(r => { if (r.ticket) setTicket(r.ticket) }).catch(() => {}),
       api.getSuspectCommits(projectId, issueId).then(r => setSuspectCommits(r.commits || [])).catch(() => {}),
+      api.getReleaseInfo(projectId, issueId).then(setReleaseInfo).catch(() => {}),
     ]).finally(() => setLoading(false))
   }, [projectId, issueId])
 
@@ -468,6 +470,45 @@ export default function IssueDetail() {
         </div>
       </div>
 
+
+      {/* Release Info */}
+      {releaseInfo && releaseInfo.first_release && releaseInfo.first_release !== 'unknown' && (
+        <div className="mb-6 rounded-lg border bg-card/50 p-4">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">Release</h2>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            <div>
+              <span className="text-muted-foreground">First seen in </span>
+              <span className="font-mono font-medium">{releaseInfo.first_release}</span>
+            </div>
+            {releaseInfo.commit_sha && (
+              <a
+                href={releaseInfo.commit_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-xs text-primary/70 hover:underline"
+              >
+                {releaseInfo.commit_sha.slice(0, 7)}
+              </a>
+            )}
+            {releaseInfo.diff_url && releaseInfo.previous_release && (
+              <a
+                href={releaseInfo.diff_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary hover:underline"
+              >
+                Diff from {releaseInfo.previous_release}
+              </a>
+            )}
+            {releaseInfo.deployed_at && (
+              <div className="text-xs text-muted-foreground">
+                Deployed {releaseInfo.deploy_environment && <span className="font-medium">{releaseInfo.deploy_environment}</span>}{' '}
+                {new Date(releaseInfo.deployed_at).toLocaleString()}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Suspect Commits */}
       {suspectCommits.length > 0 && (
