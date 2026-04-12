@@ -231,7 +231,28 @@ export const api = {
   listDeploys: (projectId: string) =>
     request<Deploy[]>(`/projects/${projectId}/deploys`),
 
+  // Ticket attachments
+  listAttachments: (projectId: string, ticketId: string) =>
+    request<Attachment[]>(`/projects/${projectId}/tickets/${ticketId}/attachments`),
+  addAttachment: (projectId: string, ticketId: string, data: { filename: string; url: string; content_type: string; size: number }) =>
+    request<Attachment>(`/projects/${projectId}/tickets/${ticketId}/attachments`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteAttachment: (projectId: string, ticketId: string, attachmentId: string) =>
+    request<void>(`/projects/${projectId}/tickets/${ticketId}/attachments/${attachmentId}`, { method: 'DELETE' }),
+
   // Uploads
+  uploadDoc: async (file: File): Promise<{ url: string; filename: string; content_type: string; size: number }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch('/api/v1/upload/doc', {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || 'Upload failed')
+    }
+    return res.json()
+  },
   uploadImage: async (file: File): Promise<string> => {
     const form = new FormData()
     form.append('file', file)
@@ -567,6 +588,19 @@ export interface SuspectCommit {
   timestamp: string
   url: string
   files: string[]
+}
+
+export interface Attachment {
+  id: string
+  ticket_id: string
+  filename: string
+  url: string
+  content_type: string
+  size_bytes: number
+  uploaded_by: string
+  uploader_name: string
+  uploader_email: string
+  created_at: string
 }
 
 export interface ReleaseInfo {

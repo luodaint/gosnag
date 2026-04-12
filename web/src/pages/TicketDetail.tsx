@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { api, isApiError, type Ticket, type Activity, type User, type Project, type IssueComment, type SuspectCommit } from '@/lib/api'
+import { api, isApiError, type Ticket, type Activity, type User, type Project, type IssueComment, type SuspectCommit, type Attachment } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { Check, ExternalLink, ArrowUpRight, Pencil, Send, ChevronRight, AlertTriangle } from 'lucide-react'
+import { Check, ExternalLink, ArrowUpRight, Pencil, Send, ChevronRight, AlertTriangle, Paperclip, FileText, Image as ImageIcon, X, Upload } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { RichEditor, RichViewer } from '@/components/ui/rich-editor'
@@ -66,6 +66,8 @@ export default function TicketDetail() {
   const [commentBody, setCommentBody] = useState('')
   const [submittingComment, setSubmittingComment] = useState(false)
   const [suspectCommits, setSuspectCommits] = useState<SuspectCommit[]>([])
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [uploading, setUploading] = useState(false)
 
   const [showResolution, setShowResolution] = useState(false)
   const [resolutionType, setResolutionType] = useState('fixed')
@@ -94,6 +96,7 @@ export default function TicketDetail() {
           } catch { /* */ }
         }
         api.getTicketTransitions(projectId, ticketId).then(r => setTransitions(r.transitions)).catch(() => {})
+        api.listAttachments(projectId, ticketId).then(setAttachments).catch(() => {})
       }),
       api.listUsers().then(setUsers),
     ]).finally(() => setLoading(false))
@@ -207,6 +210,43 @@ export default function TicketDetail() {
     } finally {
       setSubmittingComment(false)
     }
+  }
+
+  const handleUploadAttachment = async () => {
+    if (!projectId || !ticketId) return
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = true
+    input.onchange = async () => {
+      const files = input.files
+      if (!files?.length) return
+      setUploading(true)
+      try {
+        for (const file of files) {
+          const result = await api.uploadDoc(file)
+          await api.addAttachment(projectId, ticketId, {
+            filename: file.name,
+            url: result.url,
+            content_type: result.content_type,
+            size: file.size,
+          })
+        }
+        setAttachments(await api.listAttachments(projectId, ticketId))
+        toast.success('Files attached')
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : 'Upload failed')
+      } finally {
+        setUploading(false)
+      }
+    }
+    input.click()
+  }
+
+  const handleDeleteAttachment = async (id: string) => {
+    if (!projectId || !ticketId) return
+    await api.deleteAttachment(projectId, ticketId, id)
+    setAttachments(prev => prev.filter(a => a.id !== id))
+    toast.success('Attachment removed')
   }
 
   if (loading) return <div className="py-16 text-center text-muted-foreground animate-fade-in">Loading...</div>
@@ -362,6 +402,52 @@ export default function TicketDetail() {
               >
                 Click to add a description...
               </button>
+            )}
+          </div>
+
+          {/* Attachments */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">
+                Attachments {attachments.length > 0 && `(${attachments.length})`}
+              </h3>
+              <button
+                onClick={handleUploadAttachment}
+                disabled={uploading}
+                className="text-xs text-muted-foreground/50 hover:text-foreground transition-colors flex items-center gap-1"
+              >
+                <Upload className="h-3 w-3" />
+                {uploading ? 'Uploading...' : 'Add file'}
+              </button>
+            </div>
+            {attachments.length > 0 ? (
+              <div className="space-y-1">
+                {attachments.map(a => (
+                  <div key={a.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md border hover:bg-accent/30 group text-xs">
+                    {a.content_type.startsWith('image/') ? (
+                      <ImageIcon className="h-4 w-4 text-blue-400 shrink-0" />
+                    ) : (
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                    )}
+                    <a href={a.url} target="_blank" rel="noopener noreferrer" className="truncate flex-1 hover:underline text-foreground">
+                      {a.filename}
+                    </a>
+                    <span className="text-muted-foreground/50 shrink-0">
+                      {a.size_bytes > 1048576 ? `${(a.size_bytes / 1048576).toFixed(1)} MB` : `${Math.round(a.size_bytes / 1024)} KB`}
+                    </span>
+                    <span className="text-muted-foreground/40 shrink-0">{a.uploader_name?.split(' ')[0]}</span>
+                    <button
+                      onClick={() => handleDeleteAttachment(a.id)}
+                      className="opacity-0 group-hover:opacity-100 text-destructive/50 hover:text-destructive transition-opacity shrink-0"
+                      title="Remove"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground/40 italic py-2">No attachments</div>
             )}
           </div>
 

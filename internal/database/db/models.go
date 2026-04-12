@@ -306,6 +306,17 @@ type Ticket struct {
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
+type TicketAttachment struct {
+	ID          uuid.UUID `json:"id"`
+	TicketID    uuid.UUID `json:"ticket_id"`
+	Filename    string    `json:"filename"`
+	Url         string    `json:"url"`
+	ContentType string    `json:"content_type"`
+	SizeBytes   int64     `json:"size_bytes"`
+	UploadedBy  uuid.UUID `json:"uploaded_by"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type User struct {
 	ID        uuid.UUID      `json:"id"`
 	Email     string         `json:"email"`

@@ -288,6 +288,9 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.Get("/", ticketHandler.Get)
 				r.With(auth.RequireWritePermission).Put("/", ticketHandler.Update)
 				r.Get("/transitions", ticketHandler.Transitions)
+				r.Get("/attachments", ticketHandler.ListAttachments)
+				r.With(auth.RequireWritePermission).Post("/attachments", ticketHandler.AddAttachment)
+				r.With(auth.RequireWritePermission).Delete("/attachments/{attachment_id}", ticketHandler.DeleteAttachment)
 			})
 		})
 
@@ -304,6 +307,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	r.Route("/api/v1/upload", func(r chi.Router) {
 		r.Use(auth.MiddlewareWithToken(queries, cfg.BaseURL))
 		r.Post("/", uploadHandler.Upload)
+		r.Post("/doc", uploadHandler.UploadDoc)
 	})
 
 	// Serve uploaded files with safe headers
