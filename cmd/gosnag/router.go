@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -346,6 +347,12 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			}
 			fileServer.ServeHTTP(w, r)
+			return
+		}
+		// Static assets that don't exist should 404, not get the SPA fallback
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".js" || ext == ".css" || ext == ".map" || ext == ".woff" || ext == ".woff2" || ext == ".png" || ext == ".jpg" || ext == ".svg" || ext == ".ico" {
+			http.NotFound(w, r)
 			return
 		}
 		// SPA fallback: serve index.html for client-side routes
