@@ -26,7 +26,7 @@ func newBedrockProvider(cfg *gosnagconfig.Config) *bedrockProvider {
 	client := bedrockruntime.NewFromConfig(awsCfg)
 	modelID := cfg.AIBedrockModelID
 	if modelID == "" {
-		modelID = "anthropic.claude-haiku-4-5-20251001-v1:0"
+		modelID = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
 	}
 
 	return &bedrockProvider{
