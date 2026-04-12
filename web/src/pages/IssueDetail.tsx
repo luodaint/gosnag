@@ -75,11 +75,13 @@ export default function IssueDetail() {
       api.listIssueTags(projectId, issueId).then(setIssueTags),
       api.listComments(projectId, issueId).then(setComments),
       api.getTicketByIssue(projectId, issueId).then(r => { if (r.ticket) setTicket(r.ticket) }).catch(() => {}),
-      api.getSuspectCommits(projectId, issueId).then(r => setSuspectCommits(r.commits || [])).catch(() => {}),
-      api.getReleaseInfo(projectId, issueId).then(setReleaseInfo).catch(() => {}),
-      api.getMergeSuggestion(projectId, issueId).then(r => setMergeSuggestion(r.suggestion)).catch(() => {}),
-      api.getAnalysis(projectId, issueId).then(r => setAnalysis(r.analysis)).catch(() => {}),
     ]).finally(() => setLoading(false))
+
+    // Load these independently — they hit external APIs and should not block the page
+    api.getSuspectCommits(projectId, issueId).then(r => setSuspectCommits(r.commits || [])).catch(() => {})
+    api.getReleaseInfo(projectId, issueId).then(setReleaseInfo).catch(() => {})
+    api.getMergeSuggestion(projectId, issueId).then(r => setMergeSuggestion(r.suggestion)).catch(() => {})
+    api.getAnalysis(projectId, issueId).then(r => setAnalysis(r.analysis)).catch(() => {})
   }, [projectId, issueId])
 
   useEffect(() => {
