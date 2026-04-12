@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { api, isApiError, type Ticket, type Activity, type User, type Project, type IssueComment } from '@/lib/api'
+import { api, isApiError, type Ticket, type Activity, type User, type Project, type IssueComment, type SuspectCommit } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
@@ -65,6 +65,7 @@ export default function TicketDetail() {
   const [comments, setComments] = useState<IssueComment[]>([])
   const [commentBody, setCommentBody] = useState('')
   const [submittingComment, setSubmittingComment] = useState(false)
+  const [suspectCommits, setSuspectCommits] = useState<SuspectCommit[]>([])
 
   const [showResolution, setShowResolution] = useState(false)
   const [resolutionType, setResolutionType] = useState('fixed')
@@ -87,6 +88,7 @@ export default function TicketDetail() {
           setIssueLastSeen(issue.last_seen || '')
           api.listActivities(projectId, t.issue_id, { limit: 100 }).then(r => setActivities(r.activities)).catch(() => {})
           api.listComments(projectId, t.issue_id).then(setComments).catch(() => {})
+          api.getSuspectCommits(projectId, t.issue_id).then(r => setSuspectCommits(r.commits || [])).catch(() => {})
         } catch { /* */ }
         api.getTicketTransitions(projectId, ticketId).then(r => setTransitions(r.transitions)).catch(() => {})
       }),
@@ -359,6 +361,38 @@ export default function TicketDetail() {
               </button>
             )}
           </div>
+
+          {/* Suspect Commits */}
+          {suspectCommits.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">Suspect Commits</h3>
+              <div className="space-y-1">
+                {suspectCommits.map((c, i) => (
+                  <a
+                    key={c.sha}
+                    href={c.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors text-xs group"
+                  >
+                    <span className={cn(
+                      'mt-0.5 h-4 w-4 rounded-full flex items-center justify-center shrink-0 text-[9px] font-bold',
+                      i === 0 ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                    )}>{i + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <span className="font-mono text-primary/70 mr-1.5">{c.sha.slice(0, 7)}</span>
+                      <span className="text-foreground">{c.message}</span>
+                      <div className="text-muted-foreground mt-0.5">
+                        {c.author} &middot; {new Date(c.timestamp).toLocaleDateString()}
+                        {c.files.length > 0 && <> &middot; <span className="text-primary/60">{c.files.length} matching</span></>}
+                      </div>
+                    </div>
+                    <ExternalLink className="h-3 w-3 mt-1 text-muted-foreground/20 group-hover:text-primary/50 shrink-0" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Comments + Activity unified stream */}
           <div className="mb-6">

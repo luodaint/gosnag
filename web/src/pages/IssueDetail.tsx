@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/lib/use-auth'
-import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket } from '@/lib/api'
+import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket, type SuspectCommit } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
@@ -54,6 +54,7 @@ export default function IssueDetail() {
   const commentRef = useRef<HTMLTextAreaElement>(null)
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [creatingTicket, setCreatingTicket] = useState(false)
+  const [suspectCommits, setSuspectCommits] = useState<SuspectCommit[]>([])
   const eventLimit = 25
 
   useEffect(() => {
@@ -69,6 +70,7 @@ export default function IssueDetail() {
       api.listIssueTags(projectId, issueId).then(setIssueTags),
       api.listComments(projectId, issueId).then(setComments),
       api.getTicketByIssue(projectId, issueId).then(r => { if (r.ticket) setTicket(r.ticket) }).catch(() => {}),
+      api.getSuspectCommits(projectId, issueId).then(r => setSuspectCommits(r.commits || [])).catch(() => {}),
     ]).finally(() => setLoading(false))
   }, [projectId, issueId])
 
@@ -466,6 +468,49 @@ export default function IssueDetail() {
         </div>
       </div>
 
+
+      {/* Suspect Commits */}
+      {suspectCommits.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-3">Suspect Commits</h2>
+          <div className="space-y-2">
+            {suspectCommits.map((c, i) => (
+              <a
+                key={c.sha}
+                href={c.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-3 px-3 py-2.5 rounded-md border hover:bg-accent/50 transition-colors group"
+              >
+                <div className={cn(
+                  'mt-0.5 h-5 w-5 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold',
+                  i === 0 ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                )}>
+                  {i + 1}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-primary/70">{c.sha.slice(0, 7)}</span>
+                    <span className="text-sm font-medium truncate">{c.message}</span>
+                    <ExternalLink className="h-3 w-3 text-muted-foreground/30 group-hover:text-primary/50 shrink-0 transition-colors" />
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                    <span>{c.author}</span>
+                    <span className="opacity-40">&middot;</span>
+                    <span>{new Date(c.timestamp).toLocaleDateString()}</span>
+                    {c.files.length > 0 && (
+                      <>
+                        <span className="opacity-40">&middot;</span>
+                        <span className="text-primary/60">{c.files.length} matching {c.files.length === 1 ? 'file' : 'files'}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Last Event (always expanded) */}
       {events.length > 0 && (
