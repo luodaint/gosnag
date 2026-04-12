@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/darkspock/gosnag/internal/activity"
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
@@ -117,6 +118,8 @@ func (h *Handler) CreateIssueHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "issue was linked to a GitHub issue concurrently")
 		return
 	}
+
+	activity.Record(r.Context(), h.queries, issueID, nil, nil, "github_linked", "", fmt.Sprintf("#%d", result.Number), map[string]string{"url": result.URL})
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"number": result.Number,

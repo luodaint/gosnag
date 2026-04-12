@@ -42,6 +42,17 @@ type ApiToken struct {
 	Scope      string        `json:"scope"`
 }
 
+type Deploy struct {
+	ID             uuid.UUID      `json:"id"`
+	ProjectID      uuid.UUID      `json:"project_id"`
+	ReleaseVersion string         `json:"release_version"`
+	CommitSha      sql.NullString `json:"commit_sha"`
+	Environment    string         `json:"environment"`
+	Url            sql.NullString `json:"url"`
+	DeployedAt     time.Time      `json:"deployed_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
 type Event struct {
 	ID             uuid.UUID       `json:"id"`
 	IssueID        uuid.UUID       `json:"issue_id"`
@@ -100,6 +111,18 @@ type Issue struct {
 	FirstRelease         string         `json:"first_release"`
 	GithubIssueNumber    sql.NullInt32  `json:"github_issue_number"`
 	GithubIssueUrl       sql.NullString `json:"github_issue_url"`
+}
+
+type IssueActivity struct {
+	ID        uuid.UUID             `json:"id"`
+	IssueID   uuid.UUID             `json:"issue_id"`
+	TicketID  uuid.NullUUID         `json:"ticket_id"`
+	UserID    uuid.NullUUID         `json:"user_id"`
+	Action    string                `json:"action"`
+	OldValue  sql.NullString        `json:"old_value"`
+	NewValue  sql.NullString        `json:"new_value"`
+	Metadata  pqtype.NullRawMessage `json:"metadata"`
+	CreatedAt time.Time             `json:"created_at"`
 }
 
 type IssueAlias struct {
@@ -187,6 +210,13 @@ type Project struct {
 	GithubOwner            string        `json:"github_owner"`
 	GithubRepo             string        `json:"github_repo"`
 	GithubLabels           string        `json:"github_labels"`
+	WorkflowMode           string        `json:"workflow_mode"`
+	RepoProvider           string        `json:"repo_provider"`
+	RepoOwner              string        `json:"repo_owner"`
+	RepoName               string        `json:"repo_name"`
+	RepoDefaultBranch      string        `json:"repo_default_branch"`
+	RepoToken              string        `json:"repo_token"`
+	RepoPathStrip          string        `json:"repo_path_strip"`
 }
 
 type ProjectFavorite struct {
@@ -225,6 +255,16 @@ type QueryPattern struct {
 	LastSeen        time.Time `json:"last_seen"`
 }
 
+type ReleaseCommit struct {
+	ID             uuid.UUID      `json:"id"`
+	ProjectID      uuid.UUID      `json:"project_id"`
+	ReleaseVersion string         `json:"release_version"`
+	CommitSha      string         `json:"commit_sha"`
+	CommitUrl      sql.NullString `json:"commit_url"`
+	CommittedAt    sql.NullTime   `json:"committed_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
 type Session struct {
 	Token     string    `json:"token"`
 	UserID    uuid.UUID `json:"user_id"`
@@ -243,6 +283,38 @@ type TagRule struct {
 	CreatedAt  time.Time             `json:"created_at"`
 	UpdatedAt  time.Time             `json:"updated_at"`
 	Conditions pqtype.NullRawMessage `json:"conditions"`
+}
+
+type Ticket struct {
+	ID              uuid.UUID      `json:"id"`
+	IssueID         uuid.NullUUID  `json:"issue_id"`
+	ProjectID       uuid.UUID      `json:"project_id"`
+	Status          string         `json:"status"`
+	AssignedTo      uuid.NullUUID  `json:"assigned_to"`
+	CreatedBy       uuid.UUID      `json:"created_by"`
+	Priority        int32          `json:"priority"`
+	DueDate         sql.NullTime   `json:"due_date"`
+	ResolutionType  sql.NullString `json:"resolution_type"`
+	ResolutionNotes sql.NullString `json:"resolution_notes"`
+	FixReference    sql.NullString `json:"fix_reference"`
+	Title           string         `json:"title"`
+	Description     string         `json:"description"`
+	EscalatedSystem sql.NullString `json:"escalated_system"`
+	EscalatedKey    sql.NullString `json:"escalated_key"`
+	EscalatedUrl    sql.NullString `json:"escalated_url"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+}
+
+type TicketAttachment struct {
+	ID          uuid.UUID `json:"id"`
+	TicketID    uuid.UUID `json:"ticket_id"`
+	Filename    string    `json:"filename"`
+	Url         string    `json:"url"`
+	ContentType string    `json:"content_type"`
+	SizeBytes   int64     `json:"size_bytes"`
+	UploadedBy  uuid.UUID `json:"uploaded_by"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type User struct {

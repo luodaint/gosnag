@@ -1,5 +1,20 @@
 const BASE = '/api/v1'
 
+export class ApiError extends Error {
+  status: number
+  body: Record<string, unknown>
+  _isApiError = true
+  constructor(status: number, body: Record<string, unknown>) {
+    super(body.error as string || body.message as string || `Request failed: ${status}`)
+    this.status = status
+    this.body = body
+  }
+}
+
+export function isApiError(e: unknown): e is ApiError {
+  return e instanceof ApiError || (typeof e === 'object' && e !== null && '_isApiError' in e)
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...options?.headers },
@@ -13,7 +28,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.error || `Request failed: ${res.status}`)
+    throw new ApiError(res.status, body)
   }
   if (res.status === 204) return undefined as T
   return res.json()
@@ -175,6 +190,84 @@ export const api = {
   deleteGithubRule: (projectId: string, ruleId: string) =>
     request<void>(`/projects/${projectId}/github/rules/${ruleId}`, { method: 'DELETE' }),
 
+  // Tickets
+  createTicket: (projectId: string, issueId: string, data?: { priority?: number }) =>
+    request<Ticket>(`/projects/${projectId}/issues/${issueId}/ticket`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  createManualTicket: (projectId: string, data: { title: string; description?: string; priority?: number; assigned_to?: string }) =>
+    request<Ticket>(`/projects/${projectId}/tickets`, { method: 'POST', body: JSON.stringify(data) }),
+  getTicketByIssue: (projectId: string, issueId: string) =>
+    request<{ ticket: Ticket | null }>(`/projects/${projectId}/issues/${issueId}/ticket`),
+  getTicket: (projectId: string, ticketId: string) =>
+    request<Ticket>(`/projects/${projectId}/tickets/${ticketId}`),
+  updateTicket: (projectId: string, ticketId: string, data: Partial<TicketUpdate>) =>
+    request<Ticket>(`/projects/${projectId}/tickets/${ticketId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getTicketTransitions: (projectId: string, ticketId: string) =>
+    request<{ current: string; transitions: string[] }>(`/projects/${projectId}/tickets/${ticketId}/transitions`),
+  listTickets: (projectId: string, params?: { status?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.status) q.set('status', params.status)
+    if (params?.limit) q.set('limit', String(params.limit))
+    if (params?.offset) q.set('offset', String(params.offset))
+    return request<TicketListResponse>(`/projects/${projectId}/tickets?${q}`)
+  },
+  getTicketCounts: (projectId: string) =>
+    request<Record<string, number>>(`/projects/${projectId}/tickets/counts`),
+
+  // Activities
+  listActivities: (projectId: string, issueId: string, params?: { limit?: number; offset?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.limit) q.set('limit', String(params.limit))
+    if (params?.offset) q.set('offset', String(params.offset))
+    return request<ActivityListResponse>(`/projects/${projectId}/issues/${issueId}/activities?${q}`)
+  },
+
+  // Source code
+  testRepoConnection: (projectId: string) =>
+    request<{ ok: boolean; error?: string }>(`/projects/${projectId}/repo/test`, { method: 'POST' }),
+  getSuspectCommits: (projectId: string, issueId: string) =>
+    request<{ commits: SuspectCommit[] }>(`/projects/${projectId}/issues/${issueId}/suspect-commits`),
+  getReleaseInfo: (projectId: string, issueId: string) =>
+    request<ReleaseInfo>(`/projects/${projectId}/issues/${issueId}/release-info`),
+  listDeploys: (projectId: string) =>
+    request<Deploy[]>(`/projects/${projectId}/deploys`),
+
+  // Ticket attachments
+  listAttachments: (projectId: string, ticketId: string) =>
+    request<Attachment[]>(`/projects/${projectId}/tickets/${ticketId}/attachments`),
+  addAttachment: (projectId: string, ticketId: string, data: { filename: string; url: string; content_type: string; size: number }) =>
+    request<Attachment>(`/projects/${projectId}/tickets/${ticketId}/attachments`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteAttachment: (projectId: string, ticketId: string, attachmentId: string) =>
+    request<void>(`/projects/${projectId}/tickets/${ticketId}/attachments/${attachmentId}`, { method: 'DELETE' }),
+
+  // Uploads
+  uploadDoc: async (file: File): Promise<{ url: string; filename: string; content_type: string; size: number }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch('/api/v1/upload/doc', {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || 'Upload failed')
+    }
+    return res.json()
+  },
+  uploadImage: async (file: File): Promise<string> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch('/api/v1/upload', {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error || 'Upload failed')
+    }
+    const data = await res.json()
+    return data.url
+  },
+
   // Alerts
   listAlerts: (projectId: string) => request<AlertConfig[]>(`/projects/${projectId}/alerts`),
   createAlert: (projectId: string, data: { alert_type: string; config: object; enabled: boolean; level_filter?: string; title_pattern?: string; min_events?: number; min_velocity_1h?: number; exclude_pattern?: string; conditions?: object }) =>
@@ -230,6 +323,13 @@ export interface Project {
   github_owner: string
   github_repo: string
   github_labels: string
+  workflow_mode: string
+  repo_provider: string
+  repo_owner: string
+  repo_name: string
+  repo_default_branch: string
+  repo_token_set: boolean
+  repo_path_strip: string
   issue_display_mode: string
   group_id: string | null
   created_at: string
@@ -405,6 +505,122 @@ export interface GithubRule {
   title_pattern: string
   created_at: string
   updated_at: string
+}
+
+export interface Ticket {
+  id: string
+  issue_id: string
+  project_id: string
+  status: string
+  assigned_to: string | null
+  created_by: string
+  priority: number
+  due_date: string | null
+  resolution_type: string | null
+  resolution_notes: string | null
+  fix_reference: string | null
+  title: string
+  description: string
+  escalated_system: string | null
+  escalated_key: string | null
+  escalated_url: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TicketUpdate {
+  status?: string
+  assigned_to?: string
+  priority?: number
+  due_date?: string
+  resolution_type?: string
+  resolution_notes?: string
+  fix_reference?: string
+  title?: string
+  description?: string
+  escalated_system?: string
+  escalated_key?: string
+  escalated_url?: string
+  force?: boolean
+}
+
+export interface TicketWithIssue extends Ticket {
+  issue_title: string
+  issue_level: string
+  issue_event_count: number
+  issue_first_seen: string
+  issue_last_seen: string
+  assignee_name: string | null
+  assignee_email: string | null
+  assignee_avatar: string | null
+}
+
+export interface TicketListResponse {
+  tickets: TicketWithIssue[]
+  total: number
+}
+
+export interface Activity {
+  id: string
+  issue_id: string
+  ticket_id: string | null
+  user_id: string | null
+  user_name: string | null
+  user_email: string | null
+  user_avatar: string | null
+  action: string
+  old_value: string | null
+  new_value: string | null
+  metadata: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface ActivityListResponse {
+  activities: Activity[]
+  total: number
+}
+
+export interface SuspectCommit {
+  sha: string
+  message: string
+  author: string
+  email: string
+  timestamp: string
+  url: string
+  files: string[]
+}
+
+export interface Attachment {
+  id: string
+  ticket_id: string
+  filename: string
+  url: string
+  content_type: string
+  size_bytes: number
+  uploaded_by: string
+  uploader_name: string
+  uploader_email: string
+  created_at: string
+}
+
+export interface ReleaseInfo {
+  first_release: string
+  commit_sha?: string
+  commit_url?: string
+  previous_release?: string
+  diff_url?: string
+  deployed_at?: string
+  deploy_environment?: string
+}
+
+export interface Deploy {
+  id: string
+  project_id: string
+  release_version: string
+  commit_sha: string | null
+  environment: string
+  url: string | null
+  deployed_at: string
 }
 
 export interface AlertConfig {

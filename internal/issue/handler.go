@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darkspock/gosnag/internal/activity"
 	"github.com/darkspock/gosnag/internal/auth"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
@@ -411,6 +412,13 @@ func (h *Handler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Record activity
+	var userID *uuid.UUID
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		userID = &user.ID
+	}
+	activity.Record(r.Context(), h.queries, issueID, nil, userID, "status_changed", currentIssue.Status, req.Status, nil)
+
 	writeJSON(w, http.StatusOK, issueJSON(issue))
 }
 
@@ -448,6 +456,25 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to assign issue")
 		return
+	}
+
+	// Record activity
+	var actorID *uuid.UUID
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		actorID = &user.ID
+	}
+	oldAssignee := ""
+	if scoped.AssignedTo.Valid {
+		oldAssignee = scoped.AssignedTo.UUID.String()
+	}
+	newAssignee := ""
+	if assignedTo.Valid {
+		newAssignee = assignedTo.UUID.String()
+	}
+	if newAssignee != "" {
+		activity.Record(r.Context(), h.queries, issueID, nil, actorID, "assigned", oldAssignee, newAssignee, nil)
+	} else {
+		activity.Record(r.Context(), h.queries, issueID, nil, actorID, "unassigned", oldAssignee, "", nil)
 	}
 
 	writeJSON(w, http.StatusOK, issueJSON(issue))

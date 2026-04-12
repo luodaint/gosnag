@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS tickets;
+ALTER TABLE projects DROP COLUMN IF EXISTS workflow_mode;

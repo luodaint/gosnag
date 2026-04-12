@@ -42,6 +42,13 @@ type CreateProjectRequest struct {
 	GithubOwner            string  `json:"github_owner"`
 	GithubRepo             string  `json:"github_repo"`
 	GithubLabels           string  `json:"github_labels"`
+	WorkflowMode           string  `json:"workflow_mode"`
+	RepoProvider           string  `json:"repo_provider"`
+	RepoOwner              string  `json:"repo_owner"`
+	RepoName               string  `json:"repo_name"`
+	RepoDefaultBranch      string  `json:"repo_default_branch"`
+	RepoToken              string  `json:"repo_token"`
+	RepoPathStrip          string  `json:"repo_path_strip"`
 	GroupID                *string `json:"group_id,omitempty"`
 }
 
@@ -66,6 +73,13 @@ type SafeProject struct {
 	GithubOwner            string    `json:"github_owner"`
 	GithubRepo             string    `json:"github_repo"`
 	GithubLabels           string    `json:"github_labels"`
+	WorkflowMode           string    `json:"workflow_mode"`
+	RepoProvider           string    `json:"repo_provider"`
+	RepoOwner              string    `json:"repo_owner"`
+	RepoName               string    `json:"repo_name"`
+	RepoDefaultBranch      string    `json:"repo_default_branch"`
+	RepoTokenSet           bool      `json:"repo_token_set"`
+	RepoPathStrip          string    `json:"repo_path_strip"`
 	IssueDisplayMode       string    `json:"issue_display_mode"`
 	GroupID                *string   `json:"group_id"`
 	CreatedAt              time.Time     `json:"created_at"`
@@ -101,6 +115,13 @@ func toSafeProject(p db.Project) SafeProject {
 		GithubOwner:            p.GithubOwner,
 		GithubRepo:             p.GithubRepo,
 		GithubLabels:           p.GithubLabels,
+		WorkflowMode:           p.WorkflowMode,
+		RepoProvider:           p.RepoProvider,
+		RepoOwner:              p.RepoOwner,
+		RepoName:               p.RepoName,
+		RepoDefaultBranch:      p.RepoDefaultBranch,
+		RepoTokenSet:           p.RepoToken != "",
+		RepoPathStrip:          p.RepoPathStrip,
 		IssueDisplayMode:       p.IssueDisplayMode,
 		GroupID:                nullUUIDToStringPtr(p.GroupID),
 		CreatedAt:              p.CreatedAt,
@@ -167,7 +188,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.cache.Invalidate()
+	h.cache.InvalidateSync(r.Context())
 	dsn := buildDSN(r, key.PublicKey, project.NumericID)
 	legacyDSN := buildLegacyDSN(r, key.PublicKey, project.ID)
 	writeJSON(w, http.StatusCreated, ProjectResponse{SafeProject: toSafeProject(project), DSN: dsn, LegacyDSN: legacyDSN})
@@ -314,6 +335,42 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		githubToken = existing.GithubToken
 	}
 
+	workflowMode := req.WorkflowMode
+	if workflowMode == "" {
+		workflowMode = existing.WorkflowMode
+	}
+	if workflowMode != "simple" && workflowMode != "managed" {
+		workflowMode = "simple"
+	}
+
+	repoProvider := req.RepoProvider
+	if repoProvider == "" {
+		repoProvider = existing.RepoProvider
+	}
+	repoOwner := req.RepoOwner
+	if repoOwner == "" {
+		repoOwner = existing.RepoOwner
+	}
+	repoName := req.RepoName
+	if repoName == "" {
+		repoName = existing.RepoName
+	}
+	repoDefaultBranch := req.RepoDefaultBranch
+	if repoDefaultBranch == "" {
+		repoDefaultBranch = existing.RepoDefaultBranch
+	}
+	if repoDefaultBranch == "" {
+		repoDefaultBranch = "main"
+	}
+	repoToken := req.RepoToken
+	if repoToken == "" {
+		repoToken = existing.RepoToken
+	}
+	repoPathStrip := req.RepoPathStrip
+	if repoPathStrip == "" {
+		repoPathStrip = existing.RepoPathStrip
+	}
+
 	maxEvents := existing.MaxEventsPerIssue
 	if req.MaxEventsPerIssue != nil {
 		maxEvents = *req.MaxEventsPerIssue
@@ -352,6 +409,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		GithubOwner:            githubOwner,
 		GithubRepo:             githubRepo,
 		GithubLabels:           githubLabels,
+		WorkflowMode:           workflowMode,
+		RepoProvider:           repoProvider,
+		RepoOwner:              repoOwner,
+		RepoName:               repoName,
+		RepoDefaultBranch:      repoDefaultBranch,
+		RepoToken:              repoToken,
+		RepoPathStrip:          repoPathStrip,
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -396,7 +460,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.cache.Invalidate()
+	h.cache.InvalidateSync(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -421,7 +485,7 @@ func (h *Handler) Reorder(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	h.cache.Invalidate()
+	h.cache.InvalidateSync(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
 

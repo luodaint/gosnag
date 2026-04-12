@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
+	activitypkg "github.com/darkspock/gosnag/internal/activity"
 	"github.com/darkspock/gosnag/internal/alert"
 	"github.com/darkspock/gosnag/internal/comment"
 	"github.com/darkspock/gosnag/internal/auth"
@@ -20,6 +23,9 @@ import (
 	"github.com/darkspock/gosnag/internal/github"
 	"github.com/darkspock/gosnag/internal/jira"
 	"github.com/darkspock/gosnag/internal/n1"
+	"github.com/darkspock/gosnag/internal/sourcecode"
+	"github.com/darkspock/gosnag/internal/ticket"
+	"github.com/darkspock/gosnag/internal/upload"
 	"github.com/darkspock/gosnag/internal/priority"
 	"github.com/darkspock/gosnag/internal/project"
 	"github.com/darkspock/gosnag/internal/tags"
@@ -72,12 +78,42 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	alertHandler := alert.NewHandler(queries)
 	jiraHandler := jira.NewHandler(queries, cfg)
 	githubHandler := github.NewHandler(queries, cfg)
+	activityHandler := activitypkg.NewHandler(queries)
+	// Select upload storage: S3 if configured, otherwise local disk
+	var uploadStorage upload.Storage
+	if cfg.UploadS3Bucket != "" {
+		s3store, err := upload.NewS3Storage(upload.S3Config{
+			Bucket:    cfg.UploadS3Bucket,
+			Region:    cfg.UploadS3Region,
+			Prefix:    cfg.UploadS3Prefix,
+			CDNURL:    cfg.UploadS3CDNURL,
+			AccessKey: os.Getenv("AWS_ACCESS_KEY_ID"),
+			SecretKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+		})
+		if err != nil {
+			slog.Error("failed to initialize S3 storage, falling back to local", "error", err)
+			uploadStorage = &upload.LocalStorage{Dir: "uploads", BaseURL: cfg.BaseURL}
+		} else {
+			slog.Info("uploads configured with S3", "bucket", cfg.UploadS3Bucket, "region", cfg.UploadS3Region)
+			uploadStorage = s3store
+		}
+	} else {
+		uploadStorage = &upload.LocalStorage{Dir: "uploads", BaseURL: cfg.BaseURL}
+	}
+	uploadHandler := upload.NewHandler(uploadStorage)
+	sourceCodeHandler := sourcecode.NewHandler(queries)
 	priorityHandler := priority.NewHandler(queries)
 	tagsHandler := tags.NewHandler(queries)
-	commentHandler := comment.NewHandler(queries)
 	oauthHandler := auth.NewOAuthHandler(queries, cfg)
 
 	alertService := alert.NewService(queries, cfg)
+
+	ticketHandler := ticket.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
+		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
+	})
+	commentHandler := comment.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
+		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
+	})
 	ingestHandler := ingest.NewHandler(queries,
 		func(projectID uuid.UUID, iss db.Issue, isNew bool) {
 			alertService.Notify(projectID, iss, isNew)
@@ -168,6 +204,13 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 
 				// GitHub integration
 				r.With(auth.RequireAdmin).Post("/github/test", githubHandler.TestConnection)
+
+				// Source code repository
+				r.With(auth.RequireAdmin).Post("/repo/test", sourceCodeHandler.TestConnection)
+
+				// Deploys
+				r.Get("/deploys", sourceCodeHandler.ListDeploys)
+				r.With(auth.RequireWritePermission).Post("/deploys", sourceCodeHandler.Deploy)
 				r.Route("/github/rules", func(r chi.Router) {
 					r.Get("/", githubHandler.ListRules)
 					r.With(auth.RequireAdmin).Post("/", githubHandler.CreateRule)
@@ -218,6 +261,11 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.Get("/tags", tagsHandler.ListIssueTags)
 				r.With(auth.RequireWritePermission).Post("/tags", tagsHandler.AddTag)
 				r.With(auth.RequireWritePermission).Delete("/tags", tagsHandler.RemoveTag)
+				r.Get("/activities", activityHandler.List)
+				r.Get("/suspect-commits", sourceCodeHandler.SuspectCommits)
+				r.Get("/release-info", sourceCodeHandler.GetReleaseInfo)
+				r.Get("/ticket", ticketHandler.GetByIssue)
+				r.With(auth.RequireWritePermission).Post("/ticket", ticketHandler.Create)
 				r.With(auth.RequireWritePermission).Post("/jira", jiraHandler.CreateTicket)
 				r.With(auth.RequireWritePermission).Post("/github", githubHandler.CreateIssueHandler)
 				r.Post("/follow", issueHandler.Follow)
@@ -231,6 +279,21 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 			})
 		})
 
+		// Tickets (management layer)
+		r.Route("/projects/{project_id}/tickets", func(r chi.Router) {
+			r.Get("/", ticketHandler.List)
+			r.With(auth.RequireWritePermission).Post("/", ticketHandler.CreateManual)
+			r.Get("/counts", ticketHandler.Counts)
+			r.Route("/{ticket_id}", func(r chi.Router) {
+				r.Get("/", ticketHandler.Get)
+				r.With(auth.RequireWritePermission).Put("/", ticketHandler.Update)
+				r.Get("/transitions", ticketHandler.Transitions)
+				r.Get("/attachments", ticketHandler.ListAttachments)
+				r.With(auth.RequireWritePermission).Post("/attachments", ticketHandler.AddAttachment)
+				r.With(auth.RequireWritePermission).Delete("/attachments/{attachment_id}", ticketHandler.DeleteAttachment)
+			})
+		})
+
 		// Users (list strips google_id; write operations admin only)
 		r.Route("/users", func(r chi.Router) {
 			r.Get("/", userHandler.List)
@@ -239,6 +302,16 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 			r.With(auth.RequireAdmin).Put("/{user_id}/status", userHandler.UpdateStatus)
 		})
 	})
+
+	// File uploads
+	r.Route("/api/v1/upload", func(r chi.Router) {
+		r.Use(auth.MiddlewareWithToken(queries, cfg.BaseURL))
+		r.Post("/", uploadHandler.Upload)
+		r.Post("/doc", uploadHandler.UploadDoc)
+	})
+
+	// Serve uploaded files with safe headers
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", upload.ServeUploads("uploads")))
 
 	// Serve embedded frontend (SPA fallback)
 	distFS, _ := fs.Sub(web.Assets, "dist")

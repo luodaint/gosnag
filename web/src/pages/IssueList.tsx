@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { ChevronLeft, ChevronRight, ChevronDown, Settings, Trash2, Filter, Search, List, AlignLeft, Bookmark } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, Settings, Trash2, Filter, Search, List, AlignLeft, Bookmark, LayoutGrid, Ticket } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
 import { IssueListSkeleton } from '@/components/ui/skeleton'
@@ -377,6 +377,24 @@ export default function IssueList() {
             {renderSection('info', 'Info', infoCounts, infoFilters)}
 
             <div className="border-t border-border/40">
+              {project?.workflow_mode === 'managed' && (
+                <>
+                  <Link
+                    to={`/projects/${projectId}/tickets`}
+                    className="flex items-center gap-2 px-2 py-1.5 mt-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-accent/50"
+                  >
+                    <Ticket className="h-3.5 w-3.5" />
+                    Tickets
+                  </Link>
+                  <Link
+                    to={`/projects/${projectId}/board`}
+                    className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-accent/50"
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                    Board
+                  </Link>
+                </>
+              )}
               <Link
                 to={`/projects/${projectId}/settings`}
                 className="flex items-center gap-2 px-2 py-1.5 mt-2 text-sm text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-accent/50"

@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/lib/use-auth'
-import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment } from '@/lib/api'
+import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket, type SuspectCommit, type ReleaseInfo } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
@@ -16,6 +16,8 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { IssueDetailSkeleton } from '@/components/ui/skeleton'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
 import { useKeyboardShortcut } from '@/lib/use-keyboard'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 export default function IssueDetail() {
   const { projectId, issueId } = useParams<{ projectId: string; issueId: string }>()
@@ -46,6 +48,14 @@ export default function IssueDetail() {
   const [editingComment, setEditingComment] = useState<string | null>(null)
   const [editBody, setEditBody] = useState('')
   const [submittingComment, setSubmittingComment] = useState(false)
+  const [commentPreview, setCommentPreview] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const commentRef = useRef<HTMLTextAreaElement>(null)
+  const [ticket, setTicket] = useState<Ticket | null>(null)
+  const [creatingTicket, setCreatingTicket] = useState(false)
+  const [suspectCommits, setSuspectCommits] = useState<SuspectCommit[]>([])
+  const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null)
   const eventLimit = 25
 
   useEffect(() => {
@@ -60,6 +70,9 @@ export default function IssueDetail() {
       api.listUsers().then(setUsers),
       api.listIssueTags(projectId, issueId).then(setIssueTags),
       api.listComments(projectId, issueId).then(setComments),
+      api.getTicketByIssue(projectId, issueId).then(r => { if (r.ticket) setTicket(r.ticket) }).catch(() => {}),
+      api.getSuspectCommits(projectId, issueId).then(r => setSuspectCommits(r.commits || [])).catch(() => {}),
+      api.getReleaseInfo(projectId, issueId).then(setReleaseInfo).catch(() => {}),
     ]).finally(() => setLoading(false))
   }, [projectId, issueId])
 
@@ -98,6 +111,73 @@ export default function IssueDetail() {
       toast.error(e instanceof Error ? e.message : 'Failed to create Jira ticket')
     } finally {
       setCreatingJira(false)
+    }
+  }
+
+  const handleCreateTicket = async () => {
+    if (!projectId || !issueId) return
+    setCreatingTicket(true)
+    try {
+      const t = await api.createTicket(projectId, issueId)
+      setTicket(t)
+      toast.success('Ticket created')
+      navigate(`/projects/${projectId}/tickets/${t.id}`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create ticket')
+    } finally {
+      setCreatingTicket(false)
+    }
+  }
+
+  const mentionUsers = useMemo(() => {
+    if (mentionQuery === null) return []
+    const q = mentionQuery.toLowerCase()
+    return users.filter(u => (u.name || u.email).toLowerCase().includes(q)).slice(0, 5)
+  }, [mentionQuery, users])
+
+  const handleCommentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value
+    setCommentBody(val)
+    // Detect @mention trigger
+    const pos = e.target.selectionStart
+    const before = val.slice(0, pos)
+    const match = before.match(/@([\w.-]*)$/)
+    if (match) {
+      setMentionQuery(match[1])
+      setMentionIndex(0)
+    } else {
+      setMentionQuery(null)
+    }
+  }
+
+  const insertMention = (user: User) => {
+    const textarea = commentRef.current
+    if (!textarea) return
+    const pos = textarea.selectionStart
+    const before = commentBody.slice(0, pos)
+    const after = commentBody.slice(pos)
+    const mentionStart = before.lastIndexOf('@')
+    const handle = user.email.split('@')[0] // use email prefix as handle
+    const newBody = before.slice(0, mentionStart) + `@${handle} ` + after
+    setCommentBody(newBody)
+    setMentionQuery(null)
+    textarea.focus()
+  }
+
+  const handleCommentKeyDown = (e: React.KeyboardEvent) => {
+    if (mentionQuery !== null && mentionUsers.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIndex(i => Math.min(i + 1, mentionUsers.length - 1))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIndex(i => Math.max(i - 1, 0))
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        insertMention(mentionUsers[mentionIndex])
+      } else if (e.key === 'Escape') {
+        setMentionQuery(null)
+      }
     }
   }
 
@@ -350,6 +430,18 @@ export default function IssueDetail() {
               </Button>
             </a>
           )}
+          {project?.workflow_mode === 'managed' && !ticket && (
+            <Button size="sm" variant="default" onClick={handleCreateTicket} disabled={creatingTicket}>
+              {creatingTicket ? 'Creating...' : 'Manage'}
+            </Button>
+          )}
+          {ticket && (
+            <Link to={`/projects/${projectId}/tickets/${ticket.id}`}>
+              <Button size="sm" variant="outline">
+                View ticket
+              </Button>
+            </Link>
+          )}
           <Button
             size="sm"
             variant={followed ? 'default' : 'outline'}
@@ -378,6 +470,88 @@ export default function IssueDetail() {
         </div>
       </div>
 
+
+      {/* Release Info */}
+      {releaseInfo && releaseInfo.first_release && releaseInfo.first_release !== 'unknown' && (
+        <div className="mb-6 rounded-lg border bg-card/50 p-4">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">Release</h2>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            <div>
+              <span className="text-muted-foreground">First seen in </span>
+              <span className="font-mono font-medium">{releaseInfo.first_release}</span>
+            </div>
+            {releaseInfo.commit_sha && (
+              <a
+                href={releaseInfo.commit_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-xs text-primary/70 hover:underline"
+              >
+                {releaseInfo.commit_sha.slice(0, 7)}
+              </a>
+            )}
+            {releaseInfo.diff_url && releaseInfo.previous_release && (
+              <a
+                href={releaseInfo.diff_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary hover:underline"
+              >
+                Diff from {releaseInfo.previous_release}
+              </a>
+            )}
+            {releaseInfo.deployed_at && (
+              <div className="text-xs text-muted-foreground">
+                Deployed {releaseInfo.deploy_environment && <span className="font-medium">{releaseInfo.deploy_environment}</span>}{' '}
+                {new Date(releaseInfo.deployed_at).toLocaleString()}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Suspect Commits */}
+      {suspectCommits.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-3">Suspect Commits</h2>
+          <div className="space-y-2">
+            {suspectCommits.map((c, i) => (
+              <a
+                key={c.sha}
+                href={c.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-3 px-3 py-2.5 rounded-md border hover:bg-accent/50 transition-colors group"
+              >
+                <div className={cn(
+                  'mt-0.5 h-5 w-5 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold',
+                  i === 0 ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                )}>
+                  {i + 1}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-primary/70">{c.sha.slice(0, 7)}</span>
+                    <span className="text-sm font-medium truncate">{c.message}</span>
+                    <ExternalLink className="h-3 w-3 text-muted-foreground/30 group-hover:text-primary/50 shrink-0 transition-colors" />
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                    <span>{c.author}</span>
+                    <span className="opacity-40">&middot;</span>
+                    <span>{new Date(c.timestamp).toLocaleDateString()}</span>
+                    {c.files.length > 0 && (
+                      <>
+                        <span className="opacity-40">&middot;</span>
+                        <span className="text-primary/60">{c.files.length} matching {c.files.length === 1 ? 'file' : 'files'}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Last Event (always expanded) */}
       {events.length > 0 && (
@@ -418,7 +592,7 @@ export default function IssueDetail() {
               </div>
             </div>
             <div className="px-4 pb-4">
-              <EventData data={events[0].data} />
+              <EventData data={events[0].data} project={project} />
             </div>
           </div>
         </>
@@ -474,7 +648,9 @@ export default function IssueDetail() {
                   </div>
                 </div>
               ) : (
-                <p className="text-sm whitespace-pre-wrap">{c.body}</p>
+                <div className="text-sm prose prose-sm prose-invert max-w-none [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs [&_a]:text-primary [&_p]:my-1">
+                  <Markdown remarkPlugins={[remarkGfm]}>{c.body.replace(/@([\w.-]+)/g, '**@$1**')}</Markdown>
+                </div>
               )}
               {editingComment !== c.id && (currentUser?.id === c.user_id || currentUser?.role === 'admin') && (
                 <div className="flex gap-2 mt-1">
@@ -526,12 +702,49 @@ export default function IssueDetail() {
               </div>
             )}
           </div>
-          <textarea
-            value={commentBody}
-            onChange={e => setCommentBody(e.target.value)}
-            placeholder="Add a comment..."
-            className="flex-1 text-sm rounded-md border border-border bg-background px-3 py-2 min-h-[60px] resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50"
-          />
+          <div className="flex-1">
+            {commentPreview ? (
+              <div className="text-sm prose prose-sm prose-invert max-w-none rounded-md border border-border bg-background px-3 py-2 min-h-[60px] [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs [&_a]:text-primary [&_p]:my-1">
+                <Markdown remarkPlugins={[remarkGfm]}>{commentBody || '*Nothing to preview*'}</Markdown>
+              </div>
+            ) : (
+              <div className="relative">
+                <textarea
+                  ref={commentRef}
+                  value={commentBody}
+                  onChange={handleCommentChange}
+                  onKeyDown={handleCommentKeyDown}
+                  placeholder="Add a comment... (supports Markdown, @mention users)"
+                  className="w-full text-sm rounded-md border border-border bg-background px-3 py-2 min-h-[60px] resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50"
+                />
+                {mentionQuery !== null && mentionUsers.length > 0 && (
+                  <div className="absolute bottom-full left-0 mb-1 w-56 rounded-md border bg-popover shadow-lg z-50">
+                    {mentionUsers.map((u, i) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        className={cn(
+                          'w-full text-left px-3 py-1.5 text-sm hover:bg-accent',
+                          i === mentionIndex && 'bg-accent'
+                        )}
+                        onMouseDown={e => { e.preventDefault(); insertMention(u) }}
+                      >
+                        <span className="font-medium">{u.name || u.email}</span>
+                        {u.name && <span className="text-xs text-muted-foreground ml-1">{u.email}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setCommentPreview(!commentPreview)}
+              className="text-xs text-muted-foreground hover:text-foreground mt-1 transition-colors"
+            >
+              {commentPreview ? 'Edit' : 'Preview'}
+            </button>
+          </div>
           <Button type="submit" size="sm" disabled={!commentBody.trim() || submittingComment} className="mt-0.5">
             <Send className="h-4 w-4" />
           </Button>
@@ -607,7 +820,7 @@ export default function IssueDetail() {
                     <Copy className="h-3.5 w-3.5 mr-1" /> Copy full
                   </Button>
                 </div>
-                <EventData data={event.data} />
+                <EventData data={event.data} project={project} />
               </div>
             )}
           </div>
@@ -754,7 +967,23 @@ function SectionHeader({ title, count }: { title: string; count?: number }) {
   )
 }
 
-function ExceptionSection({ exception }: { exception: { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<{ filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }> } }> } }) {
+function buildSourceURL(filename: string, lineno: number, project: Project | null): string | null {
+  if (!project?.repo_provider || !project.repo_owner || !project.repo_name) return null
+  // Skip library paths
+  const lower = filename.toLowerCase()
+  if (['node_modules/', 'vendor/', 'site-packages/', 'lib/python', '.gem/', '/usr/lib/'].some(p => lower.includes(p))) return null
+  const cleanPath = project.repo_path_strip ? filename.replace(project.repo_path_strip, '') : filename
+  const branch = project.repo_default_branch || 'main'
+  if (project.repo_provider === 'github') {
+    return `https://github.com/${project.repo_owner}/${project.repo_name}/blob/${branch}/${cleanPath}#L${lineno}`
+  }
+  if (project.repo_provider === 'bitbucket') {
+    return `https://bitbucket.org/${project.repo_owner}/${project.repo_name}/src/${branch}/${cleanPath}#lines-${lineno}`
+  }
+  return null
+}
+
+function ExceptionSection({ exception, project }: { exception: { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<{ filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }> } }> }; project: Project | null }) {
   if (!exception?.values) return null
   return (
     <div className="space-y-4">
@@ -769,7 +998,9 @@ function ExceptionSection({ exception }: { exception: { values?: Array<{ type: s
             <div className="bg-[#0d1117] overflow-x-auto">
               <table className="w-full text-xs font-mono">
                 <tbody>
-                  {[...exc.stacktrace.frames].reverse().map((frame, j) => (
+                  {[...exc.stacktrace.frames].reverse().map((frame, j) => {
+                    const sourceUrl = buildSourceURL(frame.filename, frame.lineno, project)
+                    return (
                     <tr
                       key={j}
                       className={cn(
@@ -783,14 +1014,26 @@ function ExceptionSection({ exception }: { exception: { values?: Array<{ type: s
                         {frame.lineno}
                       </td>
                       <td className="px-3 py-1.5">
-                        <span className="text-muted-foreground">{frame.filename}</span>
+                        {sourceUrl ? (
+                          <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                            <span className="text-primary/70">{frame.filename}</span>
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground">{frame.filename}</span>
+                        )}
                         <span className="text-muted-foreground/40"> in </span>
                         <span className={frame.in_app ? 'text-primary font-semibold' : 'text-foreground/60'}>
                           {frame.function}
                         </span>
+                        {sourceUrl && (
+                          <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="ml-2 text-muted-foreground/30 hover:text-primary/60 transition-colors" title="View in repository">
+                            <ExternalLink className="h-3 w-3 inline" />
+                          </a>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1040,7 +1283,7 @@ function formatEventSummary(data: Record<string, unknown>): string {
   return lines.join('\n')
 }
 
-function EventData({ data }: { data: Record<string, unknown> }) {
+function EventData({ data, project }: { data: Record<string, unknown>; project?: Project | null }) {
   const [activeTab, setActiveTab] = useState('')
   const exception = data.exception as { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<{ filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }> } }> } | undefined
   const request = data.request as { method?: string; url?: string; headers?: Record<string, string>; query_string?: string; data?: unknown; env?: Record<string, string> } | undefined
@@ -1090,7 +1333,7 @@ function EventData({ data }: { data: Record<string, unknown> }) {
           </button>
         ))}
       </div>
-      {current === 'stacktrace' && exception && <ExceptionSection exception={exception} />}
+      {current === 'stacktrace' && exception && <ExceptionSection exception={exception} project={project || null} />}
       {current === 'request' && request && <RequestSection request={request} />}
       {current === 'user' && user && <UserSection user={user} />}
       {current === 'context' && contexts && <ContextsSection contexts={contexts} />}

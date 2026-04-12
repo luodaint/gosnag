@@ -128,6 +128,27 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
+const getUserByNameOrEmail = `-- name: GetUserByNameOrEmail :one
+SELECT id, email, name, role, google_id, avatar_url, created_at, updated_at, status FROM users WHERE (name = $1 OR email = $1) AND status = 'active'
+`
+
+func (q *Queries) GetUserByNameOrEmail(ctx context.Context, name string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByNameOrEmail, name)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Name,
+		&i.Role,
+		&i.GoogleID,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Status,
+	)
+	return i, err
+}
+
 const listUsers = `-- name: ListUsers :many
 SELECT id, email, name, role, google_id, avatar_url, created_at, updated_at, status FROM users ORDER BY created_at
 `

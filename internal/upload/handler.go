@@ -1,0 +1,193 @@
+package upload
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const maxUploadSize = 10 << 20 // 10 MB
+
+// allowedMIME maps detected MIME types to safe file extensions.
+var allowedMIME = map[string]string{
+	"image/png":  ".png",
+	"image/jpeg": ".jpg",
+	"image/gif":  ".gif",
+	"image/webp": ".webp",
+}
+
+// allowedDocMIME extends allowed types for document attachments.
+var allowedDocMIME = map[string]string{
+	"image/png":                ".png",
+	"image/jpeg":               ".jpg",
+	"image/gif":                ".gif",
+	"image/webp":               ".webp",
+	"application/pdf":          ".pdf",
+	"text/plain":               ".txt",
+	"text/csv":                 ".csv",
+	"application/zip":          ".zip",
+	"application/gzip":         ".gz",
+	"application/json":         ".json",
+	"application/xml":          ".xml",
+	"text/xml":                 ".xml",
+	"application/octet-stream": "", // fallback — use original extension
+}
+
+type Handler struct {
+	storage Storage
+}
+
+func NewHandler(storage Storage) *Handler {
+	return &Handler{storage: storage}
+}
+
+func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		writeError(w, http.StatusBadRequest, "file too large (max 10 MB)")
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing file")
+		return
+	}
+	defer file.Close()
+
+	// Read first 512 bytes to detect actual content type via magic bytes
+	head := make([]byte, 512)
+	n, err := file.Read(head)
+	if err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+	head = head[:n]
+
+	detected := http.DetectContentType(head)
+	ext, ok := allowedMIME[detected]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "only image files are allowed (png, jpg, gif, webp); detected: "+detected)
+		return
+	}
+
+	// Seek back to start so we copy the full file
+	file.Seek(0, io.SeekStart)
+
+	// Generate safe filename (random, controlled extension)
+	b := make([]byte, 16)
+	rand.Read(b)
+	filename := fmt.Sprintf("%s_%s%s", time.Now().Format("20060102"), hex.EncodeToString(b), ext)
+
+	url, err := h.storage.Put(r.Context(), filename, detected, file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save file: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"url": url})
+}
+
+// UploadDoc handles document/file uploads with a broader set of allowed types.
+func (h *Handler) UploadDoc(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		writeError(w, http.StatusBadRequest, "file too large (max 10 MB)")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing file")
+		return
+	}
+	defer file.Close()
+
+	// Read first 512 bytes to detect content type
+	head := make([]byte, 512)
+	n, err := file.Read(head)
+	if err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+	head = head[:n]
+
+	detected := http.DetectContentType(head)
+	ext, ok := allowedDocMIME[detected]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "file type not allowed; detected: "+detected)
+		return
+	}
+
+	// For octet-stream fallback, use original extension if safe
+	if ext == "" {
+		origExt := strings.ToLower(filepath.Ext(header.Filename))
+		safeExts := map[string]bool{
+			".pdf": true, ".txt": true, ".csv": true, ".json": true, ".xml": true,
+			".zip": true, ".gz": true, ".tar": true, ".log": true, ".md": true,
+			".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+			".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
+		}
+		if safeExts[origExt] {
+			ext = origExt
+		} else {
+			ext = ".bin"
+		}
+	}
+
+	file.Seek(0, io.SeekStart)
+
+	b := make([]byte, 16)
+	rand.Read(b)
+	filename := fmt.Sprintf("%s_%s%s", time.Now().Format("20060102"), hex.EncodeToString(b), ext)
+
+	url, err := h.storage.Put(r.Context(), filename, detected, file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save file: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{
+		"url":          url,
+		"filename":     header.Filename,
+		"content_type": detected,
+		"size":         header.Size,
+	})
+}
+
+// ServeUploads returns an http.Handler that serves locally stored uploaded files with safe headers.
+func ServeUploads(dir string) http.Handler {
+	fs := http.Dir(dir)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := filepath.Base(r.URL.Path)
+		lname := strings.ToLower(name)
+		isImage := strings.HasSuffix(lname, ".png") || strings.HasSuffix(lname, ".jpg") ||
+			strings.HasSuffix(lname, ".jpeg") || strings.HasSuffix(lname, ".gif") ||
+			strings.HasSuffix(lname, ".webp")
+
+		if !isImage {
+			w.Header().Set("Content-Disposition", "attachment; filename="+name)
+		}
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+
+		http.FileServer(fs).ServeHTTP(w, r)
+	})
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}

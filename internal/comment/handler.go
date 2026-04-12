@@ -2,21 +2,31 @@ package comment
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
+	"github.com/darkspock/gosnag/internal/activity"
 	"github.com/darkspock/gosnag/internal/auth"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
+type NotifyFunc func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID)
+
 type Handler struct {
-	queries *db.Queries
+	queries  *db.Queries
+	notifyFn NotifyFunc
 }
 
-func NewHandler(queries *db.Queries) *Handler {
-	return &Handler{queries: queries}
+func NewHandler(queries *db.Queries, notifyFn ...NotifyFunc) *Handler {
+	h := &Handler{queries: queries}
+	if len(notifyFn) > 0 {
+		h.notifyFn = notifyFn[0]
+	}
+	return h
 }
 
 type CommentResponse struct {
@@ -112,6 +122,24 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create comment")
 		return
+	}
+
+	activity.Record(r.Context(), h.queries, issueID, nil, &user.ID, "commented", "", "", map[string]string{"comment_id": comment.ID.String()})
+
+	if h.notifyFn != nil {
+		issue, _ := h.queries.GetIssue(r.Context(), issueID)
+		projectID, _ := uuid.Parse(chi.URLParam(r, "project_id"))
+		go h.notifyFn(issueID, projectID, issue.Title, fmt.Sprintf("New comment by %s", user.Name), &user.ID)
+
+		// Notify @mentioned users who may not be following
+		mentionRe := regexp.MustCompile(`@([\w.@+-]+)`)
+		matches := mentionRe.FindAllStringSubmatch(req.Body, -1)
+		for _, m := range matches {
+			if mentioned, err := h.queries.GetUserByNameOrEmail(r.Context(), m[1]); err == nil && mentioned.ID != user.ID {
+				// Auto-follow mentioned users so they see future updates
+				h.queries.FollowIssue(r.Context(), db.FollowIssueParams{UserID: mentioned.ID, IssueID: issueID})
+			}
+		}
 	}
 
 	// Return full response with user info
