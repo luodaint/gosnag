@@ -259,6 +259,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 		// Tickets (management layer)
 		r.Route("/projects/{project_id}/tickets", func(r chi.Router) {
 			r.Get("/", ticketHandler.List)
+			r.With(auth.RequireWritePermission).Post("/", ticketHandler.CreateManual)
 			r.Get("/counts", ticketHandler.Counts)
 			r.Route("/{ticket_id}", func(r chi.Router) {
 				r.Get("/", ticketHandler.Get)

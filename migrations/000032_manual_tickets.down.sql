@@ -1,0 +1,1 @@
+-- Note: cannot re-add NOT NULL if null rows exist

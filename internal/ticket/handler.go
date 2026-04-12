@@ -66,7 +66,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check no active ticket exists
-	if existing, err := h.queries.GetTicketByIssue(r.Context(), issueID); err == nil {
+	if existing, err := h.queries.GetTicketByIssue(r.Context(), uuid.NullUUID{UUID: issueID, Valid: true}); err == nil {
 		writeJSON(w, http.StatusConflict, ticketJSON(existing))
 		return
 	}
@@ -80,7 +80,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ticket, err := h.queries.CreateTicket(r.Context(), db.CreateTicketParams{
-		IssueID:    issueID,
+		IssueID:    uuid.NullUUID{UUID: issueID, Valid: true},
 		ProjectID:  projectID,
 		Status:     workflow.StatusAcknowledged,
 		AssignedTo: uuid.NullUUID{UUID: user.ID, Valid: true},
@@ -96,6 +96,74 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if h.notifyFn != nil {
 		go h.notifyFn(issueID, projectID, issue.Title, "Ticket created", &user.ID)
+	}
+
+	writeJSON(w, http.StatusCreated, ticketJSON(ticket))
+}
+
+// CreateManual creates a standalone ticket (not linked to an issue).
+func (h *Handler) CreateManual(w http.ResponseWriter, r *http.Request) {
+	projectID, err := uuid.Parse(chi.URLParam(r, "project_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+
+	user := auth.GetUserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	project, err := h.queries.GetProject(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if project.WorkflowMode != workflow.ModeManaged {
+		writeError(w, http.StatusBadRequest, "tickets require managed workflow mode")
+		return
+	}
+
+	var req struct {
+		Title       string  `json:"title"`
+		Description string  `json:"description"`
+		Priority    int     `json:"priority,omitempty"`
+		AssignedTo  *string `json:"assigned_to,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if req.Priority == 0 {
+		req.Priority = 50
+	}
+
+	assignedTo := uuid.NullUUID{UUID: user.ID, Valid: true}
+	if req.AssignedTo != nil && *req.AssignedTo != "" {
+		uid, err := uuid.Parse(*req.AssignedTo)
+		if err == nil {
+			assignedTo = uuid.NullUUID{UUID: uid, Valid: true}
+		}
+	}
+
+	ticket, err := h.queries.CreateTicket(r.Context(), db.CreateTicketParams{
+		IssueID:     uuid.NullUUID{}, // no issue
+		ProjectID:   projectID,
+		Status:      workflow.StatusAcknowledged,
+		AssignedTo:  assignedTo,
+		CreatedBy:   user.ID,
+		Priority:    int32(req.Priority),
+		Title:       req.Title,
+		Description: req.Description,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create ticket")
+		return
 	}
 
 	writeJSON(w, http.StatusCreated, ticketJSON(ticket))
@@ -140,7 +208,7 @@ func (h *Handler) GetByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ticket, err := h.queries.GetTicketByIssueIncludingDone(r.Context(), issueID)
+	ticket, err := h.queries.GetTicketByIssueIncludingDone(r.Context(), uuid.NullUUID{UUID: issueID, Valid: true})
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusOK, map[string]any{"ticket": nil})
@@ -303,46 +371,48 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Record activities and notify followers
 	if status != current.Status {
-		activity.Record(r.Context(), h.queries, ticket.IssueID, &ticket.ID, userID, "ticket_status_changed", current.Status, status, nil)
+		if ticket.IssueID.Valid {
+			activity.Record(r.Context(), h.queries, ticket.IssueID.UUID, &ticket.ID, userID, "ticket_status_changed", current.Status, status, nil)
 
-		if h.notifyFn != nil {
-			issue, _ := h.queries.GetIssue(r.Context(), ticket.IssueID)
-			go h.notifyFn(ticket.IssueID, ticket.ProjectID, issue.Title, "Status changed to "+status, userID)
-		}
-
-		// When ticket is done or wontfix, resolve the linked issue
-		if status == workflow.StatusDone || status == workflow.StatusWontfix {
-			issueStatus := "resolved"
-			if status == workflow.StatusWontfix {
-				issueStatus = "ignored"
+			if h.notifyFn != nil {
+				issue, _ := h.queries.GetIssue(r.Context(), ticket.IssueID.UUID)
+				go h.notifyFn(ticket.IssueID.UUID, ticket.ProjectID, issue.Title, "Status changed to "+status, userID)
 			}
-			h.queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
-				ID:     ticket.IssueID,
-				Status: issueStatus,
-			})
-			if status == workflow.StatusDone {
-				h.queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
-					ID:         ticket.IssueID,
-					Status:     "resolved",
-					ResolvedAt: sql.NullTime{Time: time.Now(), Valid: true},
-				})
-			}
-			activity.Record(r.Context(), h.queries, ticket.IssueID, &ticket.ID, nil, "status_changed", "", issueStatus, map[string]string{"reason": "ticket_" + status})
-		}
 
-		// When ticket is reopened (done/wontfix -> acknowledged), reopen the linked issue
-		if (current.Status == workflow.StatusDone || current.Status == workflow.StatusWontfix) && status == workflow.StatusAcknowledged {
-			issue, err := h.queries.GetIssue(r.Context(), ticket.IssueID)
-			if err == nil && issue.Status == "resolved" {
+			// When ticket is done or wontfix, resolve the linked issue
+			if status == workflow.StatusDone || status == workflow.StatusWontfix {
+				issueStatus := "resolved"
+				if status == workflow.StatusWontfix {
+					issueStatus = "ignored"
+				}
 				h.queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
-					ID:     ticket.IssueID,
-					Status: "reopened",
+					ID:     ticket.IssueID.UUID,
+					Status: issueStatus,
 				})
-				activity.Record(r.Context(), h.queries, ticket.IssueID, &ticket.ID, userID, "status_changed", "resolved", "reopened", map[string]string{"reason": "ticket_reopened"})
+				if status == workflow.StatusDone {
+					h.queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
+						ID:         ticket.IssueID.UUID,
+						Status:     "resolved",
+						ResolvedAt: sql.NullTime{Time: time.Now(), Valid: true},
+					})
+				}
+				activity.Record(r.Context(), h.queries, ticket.IssueID.UUID, &ticket.ID, nil, "status_changed", "", issueStatus, map[string]string{"reason": "ticket_" + status})
+			}
+
+			// When ticket is reopened (done/wontfix -> acknowledged), reopen the linked issue
+			if (current.Status == workflow.StatusDone || current.Status == workflow.StatusWontfix) && status == workflow.StatusAcknowledged {
+				issue, err := h.queries.GetIssue(r.Context(), ticket.IssueID.UUID)
+				if err == nil && issue.Status == "resolved" {
+					h.queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
+						ID:     ticket.IssueID.UUID,
+						Status: "reopened",
+					})
+					activity.Record(r.Context(), h.queries, ticket.IssueID.UUID, &ticket.ID, userID, "status_changed", "resolved", "reopened", map[string]string{"reason": "ticket_reopened"})
+				}
 			}
 		}
 	}
-	if assignedTo != current.AssignedTo {
+	if assignedTo != current.AssignedTo && ticket.IssueID.Valid {
 		old := ""
 		if current.AssignedTo.Valid {
 			old = current.AssignedTo.UUID.String()
@@ -351,10 +421,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		if assignedTo.Valid {
 			new = assignedTo.UUID.String()
 		}
-		activity.Record(r.Context(), h.queries, ticket.IssueID, &ticket.ID, userID, "ticket_assigned", old, new, nil)
+		activity.Record(r.Context(), h.queries, ticket.IssueID.UUID, &ticket.ID, userID, "ticket_assigned", old, new, nil)
 	}
-	if priority != current.Priority {
-		activity.Record(r.Context(), h.queries, ticket.IssueID, &ticket.ID, userID, "ticket_priority_changed", fmt.Sprintf("%d", current.Priority), fmt.Sprintf("%d", priority), nil)
+	if priority != current.Priority && ticket.IssueID.Valid {
+		activity.Record(r.Context(), h.queries, ticket.IssueID.UUID, &ticket.ID, userID, "ticket_priority_changed", fmt.Sprintf("%d", current.Priority), fmt.Sprintf("%d", priority), nil)
 	}
 
 	writeJSON(w, http.StatusOK, ticketJSON(ticket))
@@ -470,7 +540,7 @@ type UpdateTicketRequest struct {
 func ticketJSON(t db.Ticket) map[string]any {
 	m := map[string]any{
 		"id":               t.ID,
-		"issue_id":         t.IssueID,
+		"issue_id":         nullUUID(t.IssueID),
 		"project_id":       t.ProjectID,
 		"status":           t.Status,
 		"assigned_to":      nullUUID(t.AssignedTo),
@@ -494,7 +564,7 @@ func ticketJSON(t db.Ticket) map[string]any {
 func ticketListJSON(t db.ListTicketsByProjectRow) map[string]any {
 	m := map[string]any{
 		"id":               t.ID,
-		"issue_id":         t.IssueID,
+		"issue_id":         nullUUID(t.IssueID),
 		"project_id":       t.ProjectID,
 		"status":           t.Status,
 		"assigned_to":      nullUUID(t.AssignedTo),
@@ -508,8 +578,8 @@ func ticketListJSON(t db.ListTicketsByProjectRow) map[string]any {
 		"issue_title":      t.IssueTitle,
 		"issue_level":      t.IssueLevel,
 		"issue_event_count": t.IssueEventCount,
-		"issue_first_seen": t.IssueFirstSeen,
-		"issue_last_seen":  t.IssueLastSeen,
+		"issue_first_seen": nullTime(t.IssueFirstSeen),
+		"issue_last_seen":  nullTime(t.IssueLastSeen),
 		"assignee_name":    nullString(t.AssigneeName),
 		"assignee_email":   nullString(t.AssigneeEmail),
 		"assignee_avatar":  nullString(t.AssigneeAvatar),

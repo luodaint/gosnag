@@ -1,9 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { api, type Project, type TicketWithIssue } from '@/lib/api'
+import { Link, useParams, useSearchParams, useNavigate } from 'react-router-dom'
+import { api, type Project, type TicketWithIssue, type User } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { toast } from '@/lib/use-toast'
 import { cn } from '@/lib/utils'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
 
@@ -43,6 +47,13 @@ export default function TicketList() {
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
+  const [users, setUsers] = useState<User[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [newPriority, setNewPriority] = useState('50')
+  const [newAssignee, setNewAssignee] = useState('')
+  const navigate = useNavigate()
 
   const status = searchParams.get('status') || ''
   const offset = parseInt(searchParams.get('offset') || '0', 10)
@@ -58,17 +69,40 @@ export default function TicketList() {
 
   const fetchData = useCallback(async () => {
     if (!projectId) return
-    const [p, t, c] = await Promise.all([
+    const [p, t, c, u] = await Promise.all([
       api.getProject(projectId),
       api.listTickets(projectId, { status, limit, offset }),
       api.getTicketCounts(projectId),
+      api.listUsers(),
     ])
     setProject(p)
     setTickets(t.tickets)
     setTotal(t.total)
     setCounts(c)
+    setUsers(u)
     setLoading(false)
   }, [projectId, status, limit, offset])
+
+  const handleCreate = async () => {
+    if (!projectId || !newTitle.trim()) return
+    try {
+      const ticket = await api.createManualTicket(projectId, {
+        title: newTitle.trim(),
+        description: newDescription.trim() || undefined,
+        priority: parseInt(newPriority) || 50,
+        assigned_to: newAssignee || undefined,
+      })
+      setShowCreate(false)
+      setNewTitle('')
+      setNewDescription('')
+      setNewPriority('50')
+      setNewAssignee('')
+      toast.success('Ticket created')
+      navigate(`/projects/${projectId}/tickets/${ticket.id}`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create ticket')
+    }
+  }
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -85,6 +119,9 @@ export default function TicketList() {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">Tickets</h1>
         <div className="flex gap-2">
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+            <Plus className="h-4 w-4 mr-1" /> New Ticket
+          </Button>
           <Link to={`/projects/${projectId}/board`}>
             <button className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded border">
               Board View
@@ -191,6 +228,59 @@ export default function TicketList() {
           )}
         </>
       )}
+
+      {/* Create Ticket Dialog */}
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent>
+          <DialogTitle>New Ticket</DialogTitle>
+          <DialogDescription className="sr-only">Create a manual ticket</DialogDescription>
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="text-sm font-medium">Title</label>
+              <Input
+                value={newTitle}
+                onChange={e => setNewTitle(e.target.value)}
+                placeholder="Describe the task or issue..."
+                className="mt-1"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Description</label>
+              <textarea
+                value={newDescription}
+                onChange={e => setNewDescription(e.target.value)}
+                placeholder="Additional context... (optional)"
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm min-h-[80px] resize-y"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium">Priority</label>
+                <Select value={newPriority} onChange={e => setNewPriority(e.target.value)} className="mt-1">
+                  <option value="90">P1 Critical</option>
+                  <option value="70">P2 High</option>
+                  <option value="50">P3 Medium</option>
+                  <option value="25">P4 Low</option>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Assignee</label>
+                <Select value={newAssignee} onChange={e => setNewAssignee(e.target.value)} className="mt-1">
+                  <option value="">Assign to me</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>{u.name || u.email}</option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+              <Button onClick={handleCreate} disabled={!newTitle.trim()}>Create Ticket</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

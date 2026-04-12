@@ -67,18 +67,20 @@ func (q *Queries) CountTicketsByStatus(ctx context.Context, projectID uuid.UUID)
 }
 
 const createTicket = `-- name: CreateTicket :one
-INSERT INTO tickets (issue_id, project_id, status, assigned_to, created_by, priority)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO tickets (issue_id, project_id, status, assigned_to, created_by, priority, title, description)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id, issue_id, project_id, status, assigned_to, created_by, priority, due_date, resolution_type, resolution_notes, fix_reference, title, description, escalated_system, escalated_key, escalated_url, created_at, updated_at
 `
 
 type CreateTicketParams struct {
-	IssueID    uuid.UUID     `json:"issue_id"`
-	ProjectID  uuid.UUID     `json:"project_id"`
-	Status     string        `json:"status"`
-	AssignedTo uuid.NullUUID `json:"assigned_to"`
-	CreatedBy  uuid.UUID     `json:"created_by"`
-	Priority   int32         `json:"priority"`
+	IssueID     uuid.NullUUID `json:"issue_id"`
+	ProjectID   uuid.UUID     `json:"project_id"`
+	Status      string        `json:"status"`
+	AssignedTo  uuid.NullUUID `json:"assigned_to"`
+	CreatedBy   uuid.UUID     `json:"created_by"`
+	Priority    int32         `json:"priority"`
+	Title       string        `json:"title"`
+	Description string        `json:"description"`
 }
 
 func (q *Queries) CreateTicket(ctx context.Context, arg CreateTicketParams) (Ticket, error) {
@@ -89,6 +91,8 @@ func (q *Queries) CreateTicket(ctx context.Context, arg CreateTicketParams) (Tic
 		arg.AssignedTo,
 		arg.CreatedBy,
 		arg.Priority,
+		arg.Title,
+		arg.Description,
 	)
 	var i Ticket
 	err := row.Scan(
@@ -148,7 +152,7 @@ const getTicketByIssue = `-- name: GetTicketByIssue :one
 SELECT id, issue_id, project_id, status, assigned_to, created_by, priority, due_date, resolution_type, resolution_notes, fix_reference, title, description, escalated_system, escalated_key, escalated_url, created_at, updated_at FROM tickets WHERE issue_id = $1 AND status NOT IN ('done', 'wontfix') ORDER BY created_at DESC LIMIT 1
 `
 
-func (q *Queries) GetTicketByIssue(ctx context.Context, issueID uuid.UUID) (Ticket, error) {
+func (q *Queries) GetTicketByIssue(ctx context.Context, issueID uuid.NullUUID) (Ticket, error) {
 	row := q.db.QueryRowContext(ctx, getTicketByIssue, issueID)
 	var i Ticket
 	err := row.Scan(
@@ -178,7 +182,7 @@ const getTicketByIssueIncludingDone = `-- name: GetTicketByIssueIncludingDone :o
 SELECT id, issue_id, project_id, status, assigned_to, created_by, priority, due_date, resolution_type, resolution_notes, fix_reference, title, description, escalated_system, escalated_key, escalated_url, created_at, updated_at FROM tickets WHERE issue_id = $1 ORDER BY created_at DESC LIMIT 1
 `
 
-func (q *Queries) GetTicketByIssueIncludingDone(ctx context.Context, issueID uuid.UUID) (Ticket, error) {
+func (q *Queries) GetTicketByIssueIncludingDone(ctx context.Context, issueID uuid.NullUUID) (Ticket, error) {
 	row := q.db.QueryRowContext(ctx, getTicketByIssueIncludingDone, issueID)
 	var i Ticket
 	err := row.Scan(
@@ -205,11 +209,14 @@ func (q *Queries) GetTicketByIssueIncludingDone(ctx context.Context, issueID uui
 }
 
 const listTicketsByProject = `-- name: ListTicketsByProject :many
-SELECT t.id, t.issue_id, t.project_id, t.status, t.assigned_to, t.created_by, t.priority, t.due_date, t.resolution_type, t.resolution_notes, t.fix_reference, t.title, t.description, t.escalated_system, t.escalated_key, t.escalated_url, t.created_at, t.updated_at, i.title AS issue_title, i.level AS issue_level, i.event_count AS issue_event_count,
+SELECT t.id, t.issue_id, t.project_id, t.status, t.assigned_to, t.created_by, t.priority, t.due_date, t.resolution_type, t.resolution_notes, t.fix_reference, t.title, t.description, t.escalated_system, t.escalated_key, t.escalated_url, t.created_at, t.updated_at,
+       COALESCE(i.title, t.title) AS issue_title,
+       COALESCE(i.level, '') AS issue_level,
+       COALESCE(i.event_count, 0) AS issue_event_count,
        i.first_seen AS issue_first_seen, i.last_seen AS issue_last_seen,
        u.name AS assignee_name, u.email AS assignee_email, u.avatar_url AS assignee_avatar
 FROM tickets t
-JOIN issues i ON i.id = t.issue_id
+LEFT JOIN issues i ON i.id = t.issue_id
 LEFT JOIN users u ON u.id = t.assigned_to
 WHERE t.project_id = $1
   AND ($2::text = '' OR t.status = $2::text)
@@ -228,7 +235,7 @@ type ListTicketsByProjectParams struct {
 
 type ListTicketsByProjectRow struct {
 	ID              uuid.UUID      `json:"id"`
-	IssueID         uuid.UUID      `json:"issue_id"`
+	IssueID         uuid.NullUUID  `json:"issue_id"`
 	ProjectID       uuid.UUID      `json:"project_id"`
 	Status          string         `json:"status"`
 	AssignedTo      uuid.NullUUID  `json:"assigned_to"`
@@ -248,8 +255,8 @@ type ListTicketsByProjectRow struct {
 	IssueTitle      string         `json:"issue_title"`
 	IssueLevel      string         `json:"issue_level"`
 	IssueEventCount int32          `json:"issue_event_count"`
-	IssueFirstSeen  time.Time      `json:"issue_first_seen"`
-	IssueLastSeen   time.Time      `json:"issue_last_seen"`
+	IssueFirstSeen  sql.NullTime   `json:"issue_first_seen"`
+	IssueLastSeen   sql.NullTime   `json:"issue_last_seen"`
 	AssigneeName    sql.NullString `json:"assignee_name"`
 	AssigneeEmail   sql.NullString `json:"assignee_email"`
 	AssigneeAvatar  sql.NullString `json:"assignee_avatar"`

@@ -287,7 +287,7 @@ type TagRule struct {
 
 type Ticket struct {
 	ID              uuid.UUID      `json:"id"`
-	IssueID         uuid.UUID      `json:"issue_id"`
+	IssueID         uuid.NullUUID  `json:"issue_id"`
 	ProjectID       uuid.UUID      `json:"project_id"`
 	Status          string         `json:"status"`
 	AssignedTo      uuid.NullUUID  `json:"assigned_to"`

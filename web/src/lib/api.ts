@@ -193,6 +193,8 @@ export const api = {
   // Tickets
   createTicket: (projectId: string, issueId: string, data?: { priority?: number }) =>
     request<Ticket>(`/projects/${projectId}/issues/${issueId}/ticket`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  createManualTicket: (projectId: string, data: { title: string; description?: string; priority?: number; assigned_to?: string }) =>
+    request<Ticket>(`/projects/${projectId}/tickets`, { method: 'POST', body: JSON.stringify(data) }),
   getTicketByIssue: (projectId: string, issueId: string) =>
     request<{ ticket: Ticket | null }>(`/projects/${projectId}/issues/${issueId}/ticket`),
   getTicket: (projectId: string, ticketId: string) =>

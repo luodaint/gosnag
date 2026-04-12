@@ -1,6 +1,6 @@
 -- name: CreateTicket :one
-INSERT INTO tickets (issue_id, project_id, status, assigned_to, created_by, priority)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO tickets (issue_id, project_id, status, assigned_to, created_by, priority, title, description)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: GetTicket :one
@@ -34,11 +34,14 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ListTicketsByProject :many
-SELECT t.*, i.title AS issue_title, i.level AS issue_level, i.event_count AS issue_event_count,
+SELECT t.*,
+       COALESCE(i.title, t.title) AS issue_title,
+       COALESCE(i.level, '') AS issue_level,
+       COALESCE(i.event_count, 0) AS issue_event_count,
        i.first_seen AS issue_first_seen, i.last_seen AS issue_last_seen,
        u.name AS assignee_name, u.email AS assignee_email, u.avatar_url AS assignee_avatar
 FROM tickets t
-JOIN issues i ON i.id = t.issue_id
+LEFT JOIN issues i ON i.id = t.issue_id
 LEFT JOIN users u ON u.id = t.assigned_to
 WHERE t.project_id = $1
   AND ($2::text = '' OR t.status = $2::text)
