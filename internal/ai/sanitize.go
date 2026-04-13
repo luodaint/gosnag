@@ -27,8 +27,112 @@ var (
 	stylePattern = regexp.MustCompile(`(?i)\bstyle\s*=`)
 )
 
+var codeFencePattern = regexp.MustCompile("(?s)^\\s*```(?:html)?\\s*\n?(.*?)\\s*```\\s*$")
+
+// cleanCodeFences strips markdown code fences wrapping the response.
+func cleanCodeFences(s string) string {
+	if m := codeFencePattern.FindStringSubmatch(s); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return strings.TrimSpace(s)
+}
+
+// hasHTMLTags checks if the string contains any HTML tags.
+func hasHTMLTags(s string) bool {
+	return tagPattern.MatchString(s)
+}
+
+// markdownToBasicHTML converts simple markdown to HTML for cases where
+// the model ignores the HTML instruction.
+func markdownToBasicHTML(md string) string {
+	lines := strings.Split(md, "\n")
+	var sb strings.Builder
+	inList := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if inList {
+				sb.WriteString("</ul>")
+				inList = false
+			}
+			continue
+		}
+
+		// Headers
+		if strings.HasPrefix(trimmed, "### ") {
+			sb.WriteString("<h3>" + convertInline(strings.TrimPrefix(trimmed, "### ")) + "</h3>")
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") {
+			sb.WriteString("<h3>" + convertInline(strings.TrimPrefix(trimmed, "## ")) + "</h3>")
+			continue
+		}
+		if strings.HasPrefix(trimmed, "# ") {
+			sb.WriteString("<h3>" + convertInline(strings.TrimPrefix(trimmed, "# ")) + "</h3>")
+			continue
+		}
+
+		// List items
+		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+			if !inList {
+				sb.WriteString("<ul>")
+				inList = true
+			}
+			sb.WriteString("<li>" + convertInline(trimmed[2:]) + "</li>")
+			continue
+		}
+
+		// Numbered list
+		if len(trimmed) > 2 && trimmed[0] >= '0' && trimmed[0] <= '9' && (trimmed[1] == '.' || (len(trimmed) > 2 && trimmed[2] == '.')) {
+			idx := strings.Index(trimmed, ". ")
+			if idx > 0 && idx <= 3 {
+				if !inList {
+					sb.WriteString("<ul>")
+					inList = true
+				}
+				sb.WriteString("<li>" + convertInline(trimmed[idx+2:]) + "</li>")
+				continue
+			}
+		}
+
+		if inList {
+			sb.WriteString("</ul>")
+			inList = false
+		}
+		sb.WriteString("<p>" + convertInline(trimmed) + "</p>")
+	}
+	if inList {
+		sb.WriteString("</ul>")
+	}
+	return sb.String()
+}
+
+var (
+	boldPattern   = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	italicPattern = regexp.MustCompile(`\*(.+?)\*`)
+	codePattern   = regexp.MustCompile("`([^`]+)`")
+)
+
+func convertInline(s string) string {
+	s = boldPattern.ReplaceAllString(s, "<strong>$1</strong>")
+	s = codePattern.ReplaceAllString(s, "<code>$1</code>")
+	s = italicPattern.ReplaceAllString(s, "<em>$1</em>")
+	return s
+}
+
 // SanitizeHTML strips disallowed tags and attributes from HTML content.
-func SanitizeHTML(html string) string {
+// If the input is markdown (no HTML tags), it converts to basic HTML first.
+func SanitizeHTML(input string) string {
+	html := cleanCodeFences(input)
+	if !hasHTMLTags(html) {
+		html = markdownToBasicHTML(html)
+	}
+	return sanitizeTags(html)
+}
+
+// sanitizeTags strips disallowed tags and attributes.
+func sanitizeTags(html string) string {
 	return tagPattern.ReplaceAllStringFunc(html, func(tag string) string {
 		m := tagPattern.FindStringSubmatch(tag)
 		if m == nil {
