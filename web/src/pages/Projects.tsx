@@ -145,14 +145,22 @@ export default function Projects() {
     toast.success('Group deleted')
   }
 
+  const navigate = useNavigate()
+
   const handleCreate = async () => {
     if (!name.trim()) return
-    await api.createProject({ name: name.trim() })
-    toast.success('Project created')
+    const created = await api.createProject({ name: name.trim() })
     setName('')
     setShowCreate(false)
-    const updated = await api.listProjects()
-    setProjects(updated)
+
+    // If in a group, assign the project to it
+    if (activeGroup) {
+      await api.updateProject(created.id, { group_id: activeGroup })
+    }
+
+    toast.success('Project created')
+    // Navigate to settings so the user can configure it
+    navigate(`/projects/${created.id}/settings`)
   }
 
   if (loading) {
