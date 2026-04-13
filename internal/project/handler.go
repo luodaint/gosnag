@@ -509,7 +509,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		project.GroupID = groupID
 	}
 
-	h.cache.Invalidate()
+	h.cache.InvalidateSync(r.Context())
 	writeJSON(w, http.StatusOK, toSafeProject(project))
 }
 
