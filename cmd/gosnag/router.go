@@ -115,6 +115,8 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 
 	ticketHandler := ticket.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
 		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
+	}, func(projectID uuid.UUID, issue db.Issue, isNew bool) {
+		alertService.Notify(projectID, issue, isNew)
 	}, uploadStorage)
 	commentHandler := comment.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
 		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
