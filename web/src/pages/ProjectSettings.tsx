@@ -1608,20 +1608,6 @@ export default function ProjectSettings() {
                     </CardContent>
                   </Card>
 
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-base">Model Override</CardTitle>
-                      <CardDescription>Leave empty to use the server default model.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <Input
-                        value={aiModel}
-                        onChange={e => setAiModel(e.target.value)}
-                        placeholder="e.g. gpt-4o, llama-3.1-70b-versatile"
-                      />
-                    </CardContent>
-                  </Card>
-
                   {aiUsage && (
                     <Card>
                       <CardHeader>
