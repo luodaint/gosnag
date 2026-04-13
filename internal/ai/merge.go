@@ -111,10 +111,20 @@ func (mc *MergeChecker) evaluateIssue(ctx context.Context, project db.Project, n
 		return
 	}
 
-	// Filter out candidates with pending suggestions
+	// Filter: must share culprit or exception type, and no pending suggestion
+	newExcType := extractExceptionType(newIssue.Title)
 	var filtered []db.Issue
 	for _, c := range candidates {
-		if !pendingSet[c.ID] {
+		if pendingSet[c.ID] {
+			continue
+		}
+		// Same culprit (endpoint/path)
+		if newIssue.Culprit != "" && c.Culprit == newIssue.Culprit {
+			filtered = append(filtered, c)
+			continue
+		}
+		// Same exception type (part before ":")
+		if newExcType != "" && extractExceptionType(c.Title) == newExcType {
 			filtered = append(filtered, c)
 		}
 	}
@@ -304,6 +314,14 @@ func buildMergePrompt(newIssue db.Issue, newEvent db.Event, candidates []candida
 	}
 
 	return sb.String()
+}
+
+// extractExceptionType returns the exception class from a title like "ValueError: invalid input".
+func extractExceptionType(title string) string {
+	if i := strings.Index(title, ":"); i > 0 && i < 80 {
+		return strings.TrimSpace(title[:i])
+	}
+	return ""
 }
 
 func extractTopFrames(data json.RawMessage, n int) string {
