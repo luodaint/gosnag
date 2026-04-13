@@ -114,7 +114,7 @@ func Load() (*Config, error) {
 		AIBaseURL:           getEnv("AI_BASE_URL", ""),
 		AIBedrockRegion:     getEnv("AI_BEDROCK_REGION", getEnv("AWS_REGION", "eu-west-1")),
 		AIBedrockModelID:    getEnv("AI_BEDROCK_MODEL_ID", ""),
-		AIMaxTokensPerDay:   getEnvInt("AI_MAX_TOKENS_PER_DAY", 100000),
+		AIMaxTokensPerDay:   getEnvInt("AI_MAX_TOKENS_PER_DAY", 1000000),
 		AIMaxCallsPerMinute: getEnvInt("AI_MAX_CALLS_PER_MINUTE", 30),
 	}, nil
 }
