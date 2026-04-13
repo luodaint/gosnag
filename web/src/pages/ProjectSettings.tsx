@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type AIUsage, type RuleSuggestion } from '@/lib/api'
+import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type TagSuggestion, type AIUsage, type RuleSuggestion } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -124,6 +124,13 @@ export default function ProjectSettings() {
   const [trTagKey, setTrTagKey] = useState('')
   const [trTagValue, setTrTagValue] = useState('')
   const [showDeleteTagRule, setShowDeleteTagRule] = useState<string | null>(null)
+  // Tag AI assistant
+  const [showTagAssistant, setShowTagAssistant] = useState(false)
+  const [tagAssistantMessages, setTagAssistantMessages] = useState<{ role: string; content: string }[]>([])
+  const [tagAssistantInput, setTagAssistantInput] = useState('')
+  const [tagAssistantLoading, setTagAssistantLoading] = useState(false)
+  const [tagAssistantSuggestions, setTagAssistantSuggestions] = useState<TagSuggestion[]>([])
+  const [tagAssistantIncludeIssues, setTagAssistantIncludeIssues] = useState(false)
   const [allGroups, setAllGroups] = useState<ProjectGroup[]>([])
   const [selectedGroupId, setSelectedGroupId] = useState<string>('')
   // AI state
@@ -870,6 +877,50 @@ export default function ProjectSettings() {
     await api.deleteTagRule(projectId, ruleId)
     setTagRules(await api.listTagRules(projectId))
     toast.success('Rule deleted')
+  }
+
+  const openTagAssistant = () => {
+    setTagAssistantMessages([])
+    setTagAssistantInput('')
+    setTagAssistantSuggestions([])
+    setShowTagAssistant(true)
+  }
+
+  const handleTagAssistantSend = async () => {
+    if (!projectId || !tagAssistantInput.trim() || tagAssistantLoading) return
+    const userMsg = { role: 'user', content: tagAssistantInput.trim() }
+    const newMessages = [...tagAssistantMessages, userMsg]
+    setTagAssistantMessages(newMessages)
+    setTagAssistantInput('')
+    setTagAssistantLoading(true)
+    try {
+      const result = await api.suggestTagRules(projectId, {
+        include_issues: tagAssistantIncludeIssues,
+        messages: newMessages,
+      })
+      setTagAssistantMessages([...newMessages, { role: 'assistant', content: result.message }])
+      if (result.suggestions?.length) setTagAssistantSuggestions(result.suggestions)
+    } catch (e: unknown) {
+      setTagAssistantMessages([...newMessages, { role: 'assistant', content: `Error: ${e instanceof Error ? e.message : 'Failed to get suggestions'}` }])
+    } finally {
+      setTagAssistantLoading(false)
+    }
+  }
+
+  const handleAddTagSuggestion = async (s: TagSuggestion) => {
+    if (!projectId) return
+    try {
+      await api.createTagRule(projectId, {
+        name: s.name,
+        pattern: s.pattern,
+        tag_key: s.tag_key,
+        tag_value: s.tag_value,
+        enabled: true,
+      })
+      setTagRules(await api.listTagRules(projectId))
+      setTagAssistantSuggestions(prev => prev.filter(x => x !== s))
+      toast.success(`Tag rule "${s.name}" added`)
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed to add rule') }
   }
 
   const handleCopyToken = () => {
@@ -1708,9 +1759,16 @@ export default function ProjectSettings() {
                 <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <CardTitle className="text-base">Rules</CardTitle>
                   {isAdmin && (
-                    <Button size="sm" variant="outline" onClick={openAddTagRule}>
-                      <Plus className="h-4 w-4 mr-1" /> Add Rule
-                    </Button>
+                    <div className="flex gap-2">
+                      {aiProviderConfigured && (
+                        <Button size="sm" variant="outline" onClick={openTagAssistant}>
+                          <Sparkles className="h-4 w-4 mr-1" /> AI Assistant
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" onClick={openAddTagRule}>
+                        <Plus className="h-4 w-4 mr-1" /> Add Rule
+                      </Button>
+                    </div>
                   )}
                 </CardHeader>
                 <CardContent>
@@ -1789,6 +1847,73 @@ export default function ProjectSettings() {
                 variant="destructive"
                 onConfirm={() => { if (showDeleteTagRule) handleDeleteTagRule(showDeleteTagRule) }}
               />
+
+              {/* AI Tag Assistant Dialog */}
+              <Dialog open={showTagAssistant} onOpenChange={setShowTagAssistant}>
+                <DialogContent className="max-w-lg">
+                  <DialogTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-purple-400" /> AI Tag Assistant
+                  </DialogTitle>
+                  <DialogDescription className="sr-only">AI-powered assistant for creating tag rules</DialogDescription>
+                  <div className="mb-2">
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <input type="checkbox" checked={tagAssistantIncludeIssues} onChange={e => setTagAssistantIncludeIssues(e.target.checked)} className="rounded" />
+                      Include recent issues for context
+                    </label>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto space-y-2 mb-3">
+                    {tagAssistantMessages.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-4">
+                        Describe how you want to organize issues with tags. Example: &quot;Tag errors by team ownership based on the service that caused them&quot;
+                      </p>
+                    )}
+                    {tagAssistantMessages.map((m, i) => (
+                      <div key={i} className={cn('text-sm rounded-md px-3 py-2', m.role === 'user' ? 'bg-primary/10 ml-8' : 'bg-muted mr-8')}>
+                        {m.content}
+                      </div>
+                    ))}
+                    {tagAssistantLoading && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground px-3 py-2">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+                      </div>
+                    )}
+                  </div>
+                  {tagAssistantSuggestions.length > 0 && (
+                    <div className="space-y-2 mb-3">
+                      {tagAssistantSuggestions.map((s, i) => (
+                        <div key={i} className="rounded-md border border-purple-500/20 bg-purple-500/5 p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-medium">{s.name}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{s.explanation}</p>
+                              <p className="text-xs font-mono mt-1 text-muted-foreground/80">pattern: {s.pattern} &rarr; {s.tag_key}:{s.tag_value}</p>
+                            </div>
+                            <div className="flex gap-1 shrink-0">
+                              <Button size="sm" variant="outline" onClick={() => handleAddTagSuggestion(s)}>Add</Button>
+                              <Button size="sm" variant="ghost" onClick={() => setTagAssistantSuggestions(prev => prev.filter(x => x !== s))}>
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Input
+                      value={tagAssistantInput}
+                      onChange={e => setTagAssistantInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleTagAssistantSend() } }}
+                      placeholder="Describe how you want to tag issues..."
+                      disabled={tagAssistantLoading}
+                      className="flex-1"
+                    />
+                    <Button onClick={handleTagAssistantSend} disabled={tagAssistantLoading || !tagAssistantInput.trim()} size="icon">
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </>
           )}
 

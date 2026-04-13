@@ -165,6 +165,8 @@ export const api = {
     request<TagRule>(`/projects/${projectId}/tag-rules/${ruleId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTagRule: (projectId: string, ruleId: string) =>
     request<void>(`/projects/${projectId}/tag-rules/${ruleId}`, { method: 'DELETE' }),
+  suggestTagRules: (projectId: string, data: { include_issues: boolean; messages: { role: string; content: string }[] }) =>
+    request<{ message: string; suggestions: TagSuggestion[] }>(`/projects/${projectId}/tag-rules/suggest`, { method: 'POST', body: JSON.stringify(data) }),
 
   // Jira
   testJiraConnection: (projectId: string) =>
@@ -688,6 +690,14 @@ export interface AlertSuggestion {
   name: string
   alert_type: string
   conditions: object
+  explanation: string
+}
+
+export interface TagSuggestion {
+  name: string
+  pattern: string
+  tag_key: string
+  tag_value: string
   explanation: string
 }
 

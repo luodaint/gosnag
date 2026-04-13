@@ -103,13 +103,13 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	}
 	uploadHandler := upload.NewHandler(uploadStorage)
 	sourceCodeHandler := sourcecode.NewHandler(queries)
-	tagsHandler := tags.NewHandler(queries)
 	oauthHandler := auth.NewOAuthHandler(queries, cfg)
 
 	aiService := aipkg.NewService(queries, cfg)
 	aiHandler := aipkg.NewHandler(queries, aiService, cfg)
 	priorityHandler := priority.NewHandler(queries, aiService)
 	alertHandler := alert.NewHandler(queries, aiService)
+	tagsHandler := tags.NewHandler(queries, aiService)
 
 	alertService := alert.NewService(queries, cfg)
 
@@ -250,6 +250,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 					r.With(auth.RequireAdmin).Post("/", tagsHandler.CreateRule)
 					r.With(auth.RequireAdmin).Put("/{rule_id}", tagsHandler.UpdateRule)
 					r.With(auth.RequireAdmin).Delete("/{rule_id}", tagsHandler.DeleteRule)
+					r.With(auth.RequireAdmin).Post("/suggest", tagsHandler.SuggestTags)
 				})
 				r.Get("/tags", tagsHandler.ListDistinctTags)
 

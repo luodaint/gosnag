@@ -2,8 +2,11 @@ package tags
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/darkspock/gosnag/internal/ai"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -11,11 +14,12 @@ import (
 )
 
 type Handler struct {
-	queries *db.Queries
+	queries   *db.Queries
+	aiService *ai.Service
 }
 
-func NewHandler(queries *db.Queries) *Handler {
-	return &Handler{queries: queries}
+func NewHandler(queries *db.Queries, aiService *ai.Service) *Handler {
+	return &Handler{queries: queries, aiService: aiService}
 }
 
 // --- Issue Tags ---
@@ -236,6 +240,140 @@ func (h *Handler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// SuggestTags handles POST /projects/{project_id}/tag-rules/suggest
+// Conversational AI assistant for creating tag rules (uses thinking model).
+func (h *Handler) SuggestTags(w http.ResponseWriter, r *http.Request) {
+	projectID, err := uuid.Parse(chi.URLParam(r, "project_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	if h.aiService == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI not configured")
+		return
+	}
+
+	var req struct {
+		IncludeIssues bool         `json:"include_issues"`
+		Messages      []ai.Message `json:"messages"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Messages) == 0 {
+		writeError(w, http.StatusBadRequest, "messages required")
+		return
+	}
+
+	// Build context: existing tag rules
+	rules, _ := h.queries.ListTagRules(r.Context(), projectID)
+	var rulesCtx strings.Builder
+	if len(rules) > 0 {
+		rulesCtx.WriteString("## Existing Tag Rules\n")
+		for _, rule := range rules {
+			status := "enabled"
+			if !rule.Enabled {
+				status = "disabled"
+			}
+			rulesCtx.WriteString(fmt.Sprintf("- %s: pattern=%q → %s:%s (%s)\n", rule.Name, rule.Pattern, rule.TagKey, rule.TagValue, status))
+		}
+	} else {
+		rulesCtx.WriteString("## Existing Tag Rules\nNone configured yet.\n")
+	}
+
+	// Optionally include recent issues
+	var issuesCtx strings.Builder
+	if req.IncludeIssues {
+		issues, err := h.queries.ListRecentIssuesForContext(r.Context(), projectID)
+		if err == nil && len(issues) > 0 {
+			issuesCtx.WriteString("\n## Recent Issues (last 20)\n")
+			for _, iss := range issues {
+				issuesCtx.WriteString(fmt.Sprintf("- [%s] %s (platform: %s, events: %d, culprit: %s)\n",
+					iss.Level, iss.Title, iss.Platform, iss.EventCount, iss.Culprit))
+			}
+		}
+	}
+
+	// Build existing tags context
+	distinctTags, _ := h.queries.ListDistinctTags(r.Context(), projectID)
+	var tagsCtx strings.Builder
+	if len(distinctTags) > 0 {
+		tagsCtx.WriteString("\n## Existing Tags in Use\n")
+		for _, t := range distinctTags {
+			tagsCtx.WriteString(fmt.Sprintf("- %s:%s\n", t.Key, t.Value))
+		}
+	}
+
+	systemPrompt := fmt.Sprintf(`You are an AI assistant that helps create auto-tagging rules for an error tracking system.
+Tag rules automatically label issues when their title or event data matches a pattern.
+
+Each tag rule has:
+- name: descriptive name for the rule
+- pattern: regex pattern to match against issue title and event data
+- tag_key: the tag key to apply (e.g. "team", "service", "category")
+- tag_value: the tag value to apply (e.g. "payments", "auth", "database")
+
+Tags are key:value pairs. Common tagging strategies:
+- By team ownership: team:payments, team:platform, team:frontend
+- By service/component: service:api, service:worker, service:web
+- By error category: category:database, category:network, category:auth
+- By severity context: impact:user-facing, impact:internal
+- By environment: env:production, env:staging
+
+When suggesting tag rules, respond with valid JSON in this exact format:
+{
+  "message": "Your conversational response explaining the suggestions",
+  "suggestions": [
+    {
+      "name": "Rule name",
+      "pattern": "regex pattern",
+      "tag_key": "key",
+      "tag_value": "value",
+      "explanation": "Why this rule is useful"
+    }
+  ]
+}
+
+Keep suggestions practical. Use regex patterns that match error titles and stack traces.
+Suggest consistent tag keys to enable useful filtering (don't create 10 different keys — reuse a few).
+
+%s%s%s`, rulesCtx.String(), tagsCtx.String(), issuesCtx.String())
+
+	resp, err := h.aiService.ThinkingChat(r.Context(), projectID, "tag_suggest", ai.ChatRequest{
+		SystemPrompt: systemPrompt,
+		Messages:     req.Messages,
+		MaxTokens:    2048,
+		Temperature:  0.3,
+		JSON:         true,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("AI call failed: %v", err))
+		return
+	}
+
+	content := stripCodeFences(resp.Content)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(content))
+}
+
+func stripCodeFences(s string) string {
+	s = strings.TrimSpace(s)
+	fence := "```"
+	if strings.HasPrefix(s, fence) {
+		if idx := strings.Index(s, "\n"); idx != -1 {
+			s = s[idx+1:]
+		}
+		if idx := strings.LastIndex(s, fence); idx != -1 {
+			s = s[:idx]
+		}
+		s = strings.TrimSpace(s)
+	}
+	return s
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
