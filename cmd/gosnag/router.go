@@ -77,7 +77,6 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	projectHandler := project.NewHandler(queries, statsCache)
 	issueHandler := issue.NewHandler(queries, database)
 	userHandler := user.NewHandler(queries)
-	alertHandler := alert.NewHandler(queries)
 	jiraHandler := jira.NewHandler(queries, cfg)
 	githubHandler := github.NewHandler(queries, cfg)
 	activityHandler := activitypkg.NewHandler(queries)
@@ -110,6 +109,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	aiService := aipkg.NewService(queries, cfg)
 	aiHandler := aipkg.NewHandler(queries, aiService, cfg)
 	priorityHandler := priority.NewHandler(queries, aiService)
+	alertHandler := alert.NewHandler(queries, aiService)
 
 	alertService := alert.NewService(queries, cfg)
 
@@ -256,6 +256,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 					r.With(auth.RequireAdmin).Post("/", alertHandler.Create)
 					r.With(auth.RequireAdmin).Put("/{alert_id}", alertHandler.Update)
 					r.With(auth.RequireAdmin).Delete("/{alert_id}", alertHandler.Delete)
+					r.With(auth.RequireAdmin).Post("/suggest", alertHandler.SuggestAlerts)
 				})
 			})
 		})

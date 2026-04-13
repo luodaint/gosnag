@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type ProjectWithDSN, type AlertConfig, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type AIUsage, type RuleSuggestion } from '@/lib/api'
+import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type AIUsage, type RuleSuggestion } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -162,6 +162,14 @@ export default function ProjectSettings() {
   // Confirm dialogs
   const [showDeleteProject, setShowDeleteProject] = useState(false)
   const [showDeleteAlert, setShowDeleteAlert] = useState<string | null>(null)
+
+  // Alert AI assistant
+  const [showAlertAssistant, setShowAlertAssistant] = useState(false)
+  const [alertAssistantMessages, setAlertAssistantMessages] = useState<{ role: string; content: string }[]>([])
+  const [alertAssistantInput, setAlertAssistantInput] = useState('')
+  const [alertAssistantLoading, setAlertAssistantLoading] = useState(false)
+  const [alertAssistantSuggestions, setAlertAssistantSuggestions] = useState<AlertSuggestion[]>([])
+  const [alertAssistantIncludeIssues, setAlertAssistantIncludeIssues] = useState(false)
 
   // Alert form state
   const [showAlertForm, setShowAlertForm] = useState(false)
@@ -463,6 +471,51 @@ export default function ProjectSettings() {
     await api.deleteAlert(projectId, alertId)
     setAlerts(await api.listAlerts(projectId))
     toast.success('Alert deleted')
+  }
+
+  const openAlertAssistant = () => {
+    setAlertAssistantMessages([])
+    setAlertAssistantInput('')
+    setAlertAssistantSuggestions([])
+    setShowAlertAssistant(true)
+  }
+
+  const handleAlertAssistantSend = async () => {
+    if (!projectId || !alertAssistantInput.trim() || alertAssistantLoading) return
+    const userMsg = { role: 'user', content: alertAssistantInput.trim() }
+    const newMessages = [...alertAssistantMessages, userMsg]
+    setAlertAssistantMessages(newMessages)
+    setAlertAssistantInput('')
+    setAlertAssistantLoading(true)
+    try {
+      const result = await api.suggestAlerts(projectId, {
+        include_issues: alertAssistantIncludeIssues,
+        messages: newMessages,
+      })
+      setAlertAssistantMessages([...newMessages, { role: 'assistant', content: result.message }])
+      if (result.suggestions?.length) setAlertAssistantSuggestions(result.suggestions)
+    } catch (e: unknown) {
+      setAlertAssistantMessages([...newMessages, { role: 'assistant', content: `Error: ${e instanceof Error ? e.message : 'Failed to get suggestions'}` }])
+    } finally {
+      setAlertAssistantLoading(false)
+    }
+  }
+
+  const handleAddAlertSuggestion = async (s: AlertSuggestion) => {
+    if (!projectId) return
+    try {
+      await api.createAlert(projectId, {
+        alert_type: s.alert_type,
+        config: s.alert_type === 'email' ? { recipients: [] } : { webhook_url: '' },
+        enabled: true,
+        conditions: s.conditions,
+      })
+      setAlerts(await api.listAlerts(projectId))
+      setAlertAssistantSuggestions(prev => prev.filter(x => x !== s))
+      toast.success(`Alert "${s.name}" created`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create alert')
+    }
   }
 
   const handleCreateToken = async () => {
@@ -1162,11 +1215,18 @@ export default function ProjectSettings() {
                     <CardTitle className="text-base">Alert Destinations</CardTitle>
                     <CardDescription>Email and webhook routes for issue notifications.</CardDescription>
                   </div>
-                  {isAdmin && (
-                    <Button size="sm" variant="outline" onClick={openAddAlert}>
-                      <Plus className="mr-1 h-4 w-4" /> Add Alert
-                    </Button>
-                  )}
+                  <div className="flex gap-2">
+                    {isAdmin && aiEnabled && aiProviderConfigured && (
+                      <Button size="sm" variant="outline" onClick={openAlertAssistant}>
+                        <Sparkles className="h-4 w-4 mr-1" /> AI Assistant
+                      </Button>
+                    )}
+                    {isAdmin && (
+                      <Button size="sm" variant="outline" onClick={openAddAlert}>
+                        <Plus className="mr-1 h-4 w-4" /> Add Alert
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {alerts.length === 0 ? (
@@ -2488,6 +2548,90 @@ export default function ProjectSettings() {
               <Button variant="outline" onClick={() => setShowAlertForm(false)}>Cancel</Button>
               <Button onClick={handleSaveAlert}>{editingAlert ? 'Save' : 'Add'}</Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Alert Assistant Dialog */}
+      <Dialog open={showAlertAssistant} onOpenChange={setShowAlertAssistant}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-purple-400" /> AI Alert Assistant
+          </DialogTitle>
+          <DialogDescription className="sr-only">AI-powered assistant for creating alert configurations</DialogDescription>
+
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={alertAssistantIncludeIssues}
+              onChange={e => setAlertAssistantIncludeIssues(e.target.checked)}
+              className="rounded border-border"
+            />
+            Include recent issues as context
+          </label>
+
+          <div className="flex-1 overflow-y-auto space-y-3 min-h-[200px] max-h-[400px] rounded-md border p-3">
+            {alertAssistantMessages.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                Describe the alerts you need. For example: "Notify me of fatal errors and high-velocity issues."
+              </p>
+            )}
+            {alertAssistantMessages.map((m, i) => (
+              <div key={i} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+                <div className={cn(
+                  'rounded-lg px-3 py-2 text-sm max-w-[80%]',
+                  m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                )}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {alertAssistantLoading && (
+              <div className="flex justify-start">
+                <div className="bg-muted rounded-lg px-3 py-2 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {alertAssistantSuggestions.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Suggested Alerts</p>
+              {alertAssistantSuggestions.map((s, i) => (
+                <div key={i} className="rounded-md border p-3 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{s.name}</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">{s.alert_type}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="outline" onClick={() => handleAddAlertSuggestion(s)}>
+                        <Check className="h-3.5 w-3.5 mr-1" /> Add
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setAlertAssistantSuggestions(prev => prev.filter(x => x !== s))}>
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{s.explanation}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Input
+              value={alertAssistantInput}
+              onChange={e => setAlertAssistantInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAlertAssistantSend() } }}
+              placeholder="Describe what alerts you need..."
+              disabled={alertAssistantLoading}
+              className="flex-1"
+            />
+            <Button onClick={handleAlertAssistantSend} disabled={alertAssistantLoading || !alertAssistantInput.trim()} size="icon">
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

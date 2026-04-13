@@ -278,6 +278,8 @@ export const api = {
     request<AlertConfig>(`/projects/${projectId}/alerts/${alertId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAlert: (projectId: string, alertId: string) =>
     request<void>(`/projects/${projectId}/alerts/${alertId}`, { method: 'DELETE' }),
+  suggestAlerts: (projectId: string, data: { include_issues: boolean; messages: { role: string; content: string }[] }) =>
+    request<{ message: string; suggestions: AlertSuggestion[] }>(`/projects/${projectId}/alerts/suggest`, { method: 'POST', body: JSON.stringify(data) }),
 
   // AI
   getAIStatus: (projectId: string) =>
@@ -680,6 +682,13 @@ export interface AlertConfig {
   exclude_pattern: string
   conditions: object | null
   created_at: string
+}
+
+export interface AlertSuggestion {
+  name: string
+  alert_type: string
+  conditions: object
+  explanation: string
 }
 
 export interface MergeSuggestion {
