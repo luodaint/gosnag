@@ -77,7 +77,8 @@ func (c Config) StripPath(runtimePath string) string {
 	if c.PathStrip == "" {
 		return runtimePath
 	}
-	return strings.TrimPrefix(runtimePath, c.PathStrip)
+	cleaned := strings.TrimPrefix(runtimePath, c.PathStrip)
+	return strings.TrimLeft(cleaned, "/")
 }
 
 // IsLibraryPath returns true if the path looks like a third-party dependency.

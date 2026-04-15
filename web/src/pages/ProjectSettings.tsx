@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type ProjectWithDSN, type AlertConfig, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule } from '@/lib/api'
+import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type TagSuggestion, type AIUsage, type RuleSuggestion } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
-import { Bell, Copy, Gauge, Key, Pencil, Plus, Settings, ShieldAlert, Tag, Trash2, Workflow } from 'lucide-react'
+import { Bell, Brain, Check, Copy, Gauge, Key, Loader2, Pencil, Plus, Send, Settings, ShieldAlert, Sparkles, Tag, Trash2, X, Workflow } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
 import { ConditionBuilder, type ConditionGroup, type ConditionNode } from '@/components/ui/condition-builder'
@@ -48,7 +48,7 @@ const LEVEL_COLORS: Record<string, string> = {
   debug: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
 }
 
-type SettingsSection = 'general' | 'alerts' | 'tokens' | 'priority' | 'tags' | 'integrations' | 'danger'
+type SettingsSection = 'general' | 'alerts' | 'tokens' | 'priority' | 'tags' | 'ai' | 'integrations' | 'danger'
 
 export default function ProjectSettings() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -109,16 +109,43 @@ export default function ProjectSettings() {
   const [prPoints, setPrPoints] = useState('')
   const [showDeletePriorityRule, setShowDeletePriorityRule] = useState<string | null>(null)
   const [recalcing, setRecalcing] = useState(false)
+  // AI assistant dialog
+  const [showAIAssistant, setShowAIAssistant] = useState(false)
+  const [assistantMessages, setAssistantMessages] = useState<{ role: string; content: string }[]>([])
+  const [assistantInput, setAssistantInput] = useState('')
+  const [assistantLoading, setAssistantLoading] = useState(false)
+  const [assistantSuggestions, setAssistantSuggestions] = useState<RuleSuggestion[]>([])
+  const [assistantIncludeIssues, setAssistantIncludeIssues] = useState(false)
   const [tagRules, setTagRules] = useState<TagRule[]>([])
   const [showTagRuleForm, setShowTagRuleForm] = useState(false)
   const [editingTagRule, setEditingTagRule] = useState<TagRule | null>(null)
   const [trName, setTrName] = useState('')
+  const [trRuleType, setTrRuleType] = useState<'pattern' | 'ai_prompt'>('pattern')
   const [trPattern, setTrPattern] = useState('')
   const [trTagKey, setTrTagKey] = useState('')
   const [trTagValue, setTrTagValue] = useState('')
+  const [trThreshold, setTrThreshold] = useState('')
   const [showDeleteTagRule, setShowDeleteTagRule] = useState<string | null>(null)
+  // Tag AI assistant
+  const [showTagAssistant, setShowTagAssistant] = useState(false)
+  const [tagAssistantMessages, setTagAssistantMessages] = useState<{ role: string; content: string }[]>([])
+  const [tagAssistantInput, setTagAssistantInput] = useState('')
+  const [tagAssistantLoading, setTagAssistantLoading] = useState(false)
+  const [tagAssistantSuggestions, setTagAssistantSuggestions] = useState<TagSuggestion[]>([])
+  const [tagAssistantIncludeIssues, setTagAssistantIncludeIssues] = useState(false)
   const [allGroups, setAllGroups] = useState<ProjectGroup[]>([])
   const [selectedGroupId, setSelectedGroupId] = useState<string>('')
+  // AI state
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiModel, setAiModel] = useState('')
+  const [aiMergeSuggestions, setAiMergeSuggestions] = useState(false)
+  const [aiAutoMerge, setAiAutoMerge] = useState(false)
+  const [aiTicketDescription, setAiTicketDescription] = useState(true)
+  const [aiRootCause, setAiRootCause] = useState(false)
+  const [aiProviderConfigured, setAiProviderConfigured] = useState(false)
+  const [aiProviderName, setAiProviderName] = useState('')
+  const [aiUsage, setAiUsage] = useState<AIUsage | null>(null)
+  const [savingAI, setSavingAI] = useState(false)
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
   const [defaultCooldown, setDefaultCooldown] = useState('60')
@@ -144,6 +171,14 @@ export default function ProjectSettings() {
   // Confirm dialogs
   const [showDeleteProject, setShowDeleteProject] = useState(false)
   const [showDeleteAlert, setShowDeleteAlert] = useState<string | null>(null)
+
+  // Alert AI assistant
+  const [showAlertAssistant, setShowAlertAssistant] = useState(false)
+  const [alertAssistantMessages, setAlertAssistantMessages] = useState<{ role: string; content: string }[]>([])
+  const [alertAssistantInput, setAlertAssistantInput] = useState('')
+  const [alertAssistantLoading, setAlertAssistantLoading] = useState(false)
+  const [alertAssistantSuggestions, setAlertAssistantSuggestions] = useState<AlertSuggestion[]>([])
+  const [alertAssistantIncludeIssues, setAlertAssistantIncludeIssues] = useState(false)
 
   // Alert form state
   const [showAlertForm, setShowAlertForm] = useState(false)
@@ -179,6 +214,12 @@ export default function ProjectSettings() {
     setRepoToken('')
     setRepoPathStrip(p.repo_path_strip || '')
     setSelectedGroupId(p.group_id || '')
+    setAiEnabled(p.ai_enabled)
+    setAiModel(p.ai_model || '')
+    setAiMergeSuggestions(p.ai_merge_suggestions)
+    setAiAutoMerge(p.ai_auto_merge)
+    setAiTicketDescription(p.ai_ticket_description)
+    setAiRootCause(p.ai_root_cause)
   }
 
   const refreshProject = async (id: string) => {
@@ -211,6 +252,12 @@ export default function ProjectSettings() {
     github_repo: githubRepo,
     github_labels: githubLabels,
     group_id: selectedGroupId || null,
+    ai_enabled: aiEnabled,
+    ai_model: aiModel,
+    ai_merge_suggestions: aiMergeSuggestions,
+    ai_auto_merge: aiAutoMerge,
+    ai_ticket_description: aiTicketDescription,
+    ai_root_cause: aiRootCause,
   })
 
   useEffect(() => {
@@ -224,6 +271,8 @@ export default function ProjectSettings() {
       api.listGroups().then(setAllGroups),
       api.listPriorityRules(projectId).then(setPriorityRules),
       api.listTagRules(projectId).then(setTagRules),
+      api.getAIStatus(projectId).then(s => { setAiProviderConfigured(s.provider_configured); setAiProviderName(s.provider) }).catch(() => {}),
+      api.getAIUsage(projectId).then(setAiUsage).catch(() => {}),
     ]).finally(() => setLoading(false))
   }, [projectId])
 
@@ -306,6 +355,22 @@ export default function ProjectSettings() {
       toast.error(e instanceof Error ? e.message : 'Failed to save GitHub settings')
     } finally {
       setSavingGithub(false)
+    }
+  }
+
+  const handleSaveAI = async () => {
+    if (!projectId) return
+    setSavingAI(true)
+    try {
+      await api.updateProject(projectId, buildProjectPayload())
+      await refreshProject(projectId)
+      const usage = await api.getAIUsage(projectId).catch(() => null)
+      if (usage) setAiUsage(usage)
+      toast.success('AI settings saved')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save AI settings')
+    } finally {
+      setSavingAI(false)
     }
   }
 
@@ -415,6 +480,51 @@ export default function ProjectSettings() {
     await api.deleteAlert(projectId, alertId)
     setAlerts(await api.listAlerts(projectId))
     toast.success('Alert deleted')
+  }
+
+  const openAlertAssistant = () => {
+    setAlertAssistantMessages([])
+    setAlertAssistantInput('')
+    setAlertAssistantSuggestions([])
+    setShowAlertAssistant(true)
+  }
+
+  const handleAlertAssistantSend = async () => {
+    if (!projectId || !alertAssistantInput.trim() || alertAssistantLoading) return
+    const userMsg = { role: 'user', content: alertAssistantInput.trim() }
+    const newMessages = [...alertAssistantMessages, userMsg]
+    setAlertAssistantMessages(newMessages)
+    setAlertAssistantInput('')
+    setAlertAssistantLoading(true)
+    try {
+      const result = await api.suggestAlerts(projectId, {
+        include_issues: alertAssistantIncludeIssues,
+        messages: newMessages,
+      })
+      setAlertAssistantMessages([...newMessages, { role: 'assistant', content: result.message }])
+      if (result.suggestions?.length) setAlertAssistantSuggestions(result.suggestions)
+    } catch (e: unknown) {
+      setAlertAssistantMessages([...newMessages, { role: 'assistant', content: `Error: ${e instanceof Error ? e.message : 'Failed to get suggestions'}` }])
+    } finally {
+      setAlertAssistantLoading(false)
+    }
+  }
+
+  const handleAddAlertSuggestion = async (s: AlertSuggestion) => {
+    if (!projectId) return
+    try {
+      await api.createAlert(projectId, {
+        alert_type: s.alert_type,
+        config: s.alert_type === 'email' ? { recipients: [] } : { webhook_url: '' },
+        enabled: true,
+        conditions: s.conditions,
+      })
+      setAlerts(await api.listAlerts(projectId))
+      setAlertAssistantSuggestions(prev => prev.filter(x => x !== s))
+      toast.success(`Alert "${s.name}" created`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create alert')
+    }
   }
 
   const handleCreateToken = async () => {
@@ -604,14 +714,15 @@ export default function ProjectSettings() {
   }
 
   const RULE_TYPES = [
-    { value: 'level_is', label: 'Level is', needsPattern: true, needsThreshold: false },
-    { value: 'platform_is', label: 'Platform is', needsPattern: true, needsThreshold: false },
-    { value: 'title_contains', label: 'Title contains', needsPattern: true, needsThreshold: false },
-    { value: 'title_not_contains', label: 'Title does not contain', needsPattern: true, needsThreshold: false },
-    { value: 'total_events', label: 'Total events', needsPattern: false, needsThreshold: true },
-    { value: 'velocity_1h', label: 'Events per hour', needsPattern: false, needsThreshold: true },
-    { value: 'velocity_24h', label: 'Events per 24h', needsPattern: false, needsThreshold: true },
-    { value: 'user_count', label: 'Affected users', needsPattern: false, needsThreshold: true },
+    { value: 'level_is', label: 'Level is', needsPattern: true, needsThreshold: false, needsPrompt: false },
+    { value: 'platform_is', label: 'Platform is', needsPattern: true, needsThreshold: false, needsPrompt: false },
+    { value: 'title_contains', label: 'Title contains', needsPattern: true, needsThreshold: false, needsPrompt: false },
+    { value: 'title_not_contains', label: 'Title does not contain', needsPattern: true, needsThreshold: false, needsPrompt: false },
+    { value: 'total_events', label: 'Total events', needsPattern: false, needsThreshold: true, needsPrompt: false },
+    { value: 'velocity_1h', label: 'Events per hour', needsPattern: false, needsThreshold: true, needsPrompt: false },
+    { value: 'velocity_24h', label: 'Events per 24h', needsPattern: false, needsThreshold: true, needsPrompt: false },
+    { value: 'user_count', label: 'Affected users', needsPattern: false, needsThreshold: true, needsPrompt: false },
+    ...(aiEnabled && aiProviderConfigured ? [{ value: 'ai_prompt', label: 'AI Prompt', needsPattern: false, needsThreshold: false, needsPrompt: true }] : []),
   ]
 
   const openAddPriorityRule = () => {
@@ -689,19 +800,67 @@ export default function ProjectSettings() {
     }
   }
 
+  const openAIAssistant = () => {
+    setAssistantMessages([])
+    setAssistantInput('')
+    setAssistantSuggestions([])
+    setShowAIAssistant(true)
+  }
+
+  const handleAssistantSend = async () => {
+    if (!projectId || !assistantInput.trim() || assistantLoading) return
+    const userMsg = { role: 'user', content: assistantInput.trim() }
+    const newMessages = [...assistantMessages, userMsg]
+    setAssistantMessages(newMessages)
+    setAssistantInput('')
+    setAssistantLoading(true)
+    try {
+      const result = await api.suggestPriorityRules(projectId, {
+        include_issues: assistantIncludeIssues,
+        messages: newMessages,
+      })
+      setAssistantMessages([...newMessages, { role: 'assistant', content: result.message }])
+      if (result.suggestions?.length) setAssistantSuggestions(result.suggestions)
+    } catch (e: unknown) {
+      setAssistantMessages([...newMessages, { role: 'assistant', content: `Error: ${e instanceof Error ? e.message : 'Failed to get suggestions'}` }])
+    } finally {
+      setAssistantLoading(false)
+    }
+  }
+
+  const handleAddSuggestion = async (s: RuleSuggestion) => {
+    if (!projectId) return
+    try {
+      await api.createPriorityRule(projectId, {
+        name: s.name,
+        rule_type: s.rule_type,
+        pattern: s.pattern || '',
+        operator: s.operator || 'gte',
+        threshold: s.threshold || 0,
+        points: s.points,
+        enabled: true,
+      })
+      setPriorityRules(await api.listPriorityRules(projectId))
+      setAssistantSuggestions(prev => prev.filter(x => x !== s))
+      toast.success(`Rule "${s.name}" created`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create rule')
+    }
+  }
+
   const currentRuleType = RULE_TYPES.find(t => t.value === prRuleType)
 
   const openAddTagRule = () => {
-    setEditingTagRule(null); setTrName(''); setTrPattern(''); setTrTagKey(''); setTrTagValue('')
+    setEditingTagRule(null); setTrName(''); setTrRuleType('pattern'); setTrPattern(''); setTrTagKey(''); setTrTagValue(''); setTrThreshold('')
     setShowTagRuleForm(true)
   }
   const openEditTagRule = (r: TagRule) => {
-    setEditingTagRule(r); setTrName(r.name); setTrPattern(r.pattern); setTrTagKey(r.tag_key); setTrTagValue(r.tag_value)
+    setEditingTagRule(r); setTrName(r.name); setTrRuleType((r.rule_type || 'pattern') as 'pattern' | 'ai_prompt'); setTrPattern(r.pattern); setTrTagKey(r.tag_key); setTrTagValue(r.tag_value); setTrThreshold(r.threshold > 0 ? String(r.threshold) : '')
     setShowTagRuleForm(true)
   }
   const handleSaveTagRule = async () => {
     if (!projectId) return
-    const data = { name: trName, pattern: trPattern, tag_key: trTagKey, tag_value: trTagValue, enabled: editingTagRule ? editingTagRule.enabled : true }
+    const data = { name: trName, rule_type: trRuleType, pattern: trPattern, tag_key: trTagKey, tag_value: trTagValue, threshold: parseInt(trThreshold) || 0, enabled: editingTagRule ? editingTagRule.enabled : true }
     try {
       if (editingTagRule) await api.updateTagRule(projectId, editingTagRule.id, data)
       else await api.createTagRule(projectId, data)
@@ -720,6 +879,50 @@ export default function ProjectSettings() {
     await api.deleteTagRule(projectId, ruleId)
     setTagRules(await api.listTagRules(projectId))
     toast.success('Rule deleted')
+  }
+
+  const openTagAssistant = () => {
+    setTagAssistantMessages([])
+    setTagAssistantInput('')
+    setTagAssistantSuggestions([])
+    setShowTagAssistant(true)
+  }
+
+  const handleTagAssistantSend = async () => {
+    if (!projectId || !tagAssistantInput.trim() || tagAssistantLoading) return
+    const userMsg = { role: 'user', content: tagAssistantInput.trim() }
+    const newMessages = [...tagAssistantMessages, userMsg]
+    setTagAssistantMessages(newMessages)
+    setTagAssistantInput('')
+    setTagAssistantLoading(true)
+    try {
+      const result = await api.suggestTagRules(projectId, {
+        include_issues: tagAssistantIncludeIssues,
+        messages: newMessages,
+      })
+      setTagAssistantMessages([...newMessages, { role: 'assistant', content: result.message }])
+      if (result.suggestions?.length) setTagAssistantSuggestions(result.suggestions)
+    } catch (e: unknown) {
+      setTagAssistantMessages([...newMessages, { role: 'assistant', content: `Error: ${e instanceof Error ? e.message : 'Failed to get suggestions'}` }])
+    } finally {
+      setTagAssistantLoading(false)
+    }
+  }
+
+  const handleAddTagSuggestion = async (s: TagSuggestion) => {
+    if (!projectId) return
+    try {
+      await api.createTagRule(projectId, {
+        name: s.name,
+        pattern: s.pattern,
+        tag_key: s.tag_key,
+        tag_value: s.tag_value,
+        enabled: true,
+      })
+      setTagRules(await api.listTagRules(projectId))
+      setTagAssistantSuggestions(prev => prev.filter(x => x !== s))
+      toast.success(`Tag rule "${s.name}" added`)
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed to add rule') }
   }
 
   const handleCopyToken = () => {
@@ -784,6 +987,16 @@ export default function ProjectSettings() {
       badge: `${tagRules.length}`,
       icon: Tag,
     },
+    ...(aiProviderConfigured
+      ? [
+          {
+            id: 'ai' as const,
+            label: 'AI',
+            badge: aiEnabled ? 'On' : 'Off',
+            icon: Brain,
+          },
+        ]
+      : []),
     ...(isAdmin
       ? [
           {
@@ -1055,11 +1268,18 @@ export default function ProjectSettings() {
                     <CardTitle className="text-base">Alert Destinations</CardTitle>
                     <CardDescription>Email and webhook routes for issue notifications.</CardDescription>
                   </div>
-                  {isAdmin && (
-                    <Button size="sm" variant="outline" onClick={openAddAlert}>
-                      <Plus className="mr-1 h-4 w-4" /> Add Alert
-                    </Button>
-                  )}
+                  <div className="flex gap-2">
+                    {isAdmin && aiEnabled && aiProviderConfigured && (
+                      <Button size="sm" variant="outline" onClick={openAlertAssistant}>
+                        <Sparkles className="h-4 w-4 mr-1" /> AI Assistant
+                      </Button>
+                    )}
+                    {isAdmin && (
+                      <Button size="sm" variant="outline" onClick={openAddAlert}>
+                        <Plus className="mr-1 h-4 w-4" /> Add Alert
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {alerts.length === 0 ? (
@@ -1235,6 +1455,11 @@ export default function ProjectSettings() {
                         {recalcing ? 'Recalculating...' : 'Recalculate All'}
                       </Button>
                     )}
+                    {isAdmin && aiEnabled && aiProviderConfigured && (
+                      <Button size="sm" variant="outline" onClick={openAIAssistant}>
+                        <Sparkles className="h-4 w-4 mr-1" /> AI Assistant
+                      </Button>
+                    )}
                     {isAdmin && (
                       <Button size="sm" variant="outline" onClick={openAddPriorityRule}>
                         <Plus className="h-4 w-4 mr-1" /> Add Rule
@@ -1266,9 +1491,10 @@ export default function ProjectSettings() {
                               </button>
                               <span className={cn(
                                 'text-xs font-mono px-1.5 py-0.5 rounded',
+                                r.rule_type === 'ai_prompt' ? 'bg-purple-500/15 text-purple-400' :
                                 r.points > 0 ? 'bg-red-500/15 text-red-400' : 'bg-blue-500/15 text-blue-400'
                               )}>
-                                {r.points > 0 ? '+' : ''}{r.points}
+                                {r.rule_type === 'ai_prompt' ? `\u00B1${r.points}` : `${r.points > 0 ? '+' : ''}${r.points}`}
                               </span>
                             </div>
                             {isAdmin && (
@@ -1293,9 +1519,21 @@ export default function ProjectSettings() {
                             )}
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {RULE_TYPES.find(t => t.value === r.rule_type)?.label || r.rule_type}
-                            {r.pattern ? `: ${r.pattern}` : ''}
-                            {r.threshold > 0 ? ` ${r.operator || '≥'} ${r.threshold}` : ''}
+                            {r.rule_type === 'ai_prompt' ? (
+                              <>
+                                <span className="inline-flex items-center gap-1 rounded bg-purple-500/15 text-purple-400 px-1.5 py-0.5 mr-1">
+                                  <Sparkles className="h-3 w-3" /> AI
+                                </span>
+                                {r.pattern.length > 60 ? r.pattern.slice(0, 60) + '...' : r.pattern}
+                                {r.threshold > 0 && <span className="ml-2 text-muted-foreground/60">at {r.threshold} events</span>}
+                              </>
+                            ) : (
+                              <>
+                                {RULE_TYPES.find(t => t.value === r.rule_type)?.label || r.rule_type}
+                                {r.pattern ? `: ${r.pattern}` : ''}
+                                {r.threshold > 0 ? ` ${r.operator || '≥'} ${r.threshold}` : ''}
+                              </>
+                            )}
                           </p>
                         </div>
                       ))}
@@ -1340,6 +1578,26 @@ export default function ProjectSettings() {
                         )}
                       </div>
                     )}
+                    {currentRuleType?.needsPrompt && (
+                      <>
+                        <div>
+                          <label className="text-sm font-medium">AI Prompt</label>
+                          <textarea
+                            value={prPattern}
+                            onChange={e => setPrPattern(e.target.value)}
+                            placeholder="e.g. Assign high points if this error affects payment, checkout, or authentication flows"
+                            rows={4}
+                            className="mt-1 w-full rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                          <p className="mt-1 text-xs text-muted-foreground">Describe what the AI should evaluate. It will receive the issue title, level, platform, and latest event data.</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Event Threshold</label>
+                          <Input type="number" min={1} value={prThreshold} onChange={e => setPrThreshold(e.target.value)} placeholder="e.g. 1" className="mt-1" />
+                          <p className="mt-1 text-xs text-muted-foreground">AI evaluates when the issue reaches this many events. Use 1 for first-event triage.</p>
+                        </div>
+                      </>
+                    )}
                     {currentRuleType?.needsThreshold && (
                       <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -1360,8 +1618,12 @@ export default function ProjectSettings() {
                     )}
                     <div>
                       <label className="text-sm font-medium">Points</label>
-                      <Input type="number" value={prPoints} onChange={e => setPrPoints(e.target.value)} placeholder="e.g. 20 or -10" className="mt-1" />
-                      <p className="mt-1 text-xs text-muted-foreground">Positive = higher priority, negative = lower. Base score is 50, clamped to 0–100.</p>
+                      <Input type="number" value={prPoints} onChange={e => setPrPoints(e.target.value)} placeholder={currentRuleType?.needsPrompt ? 'e.g. 25' : 'e.g. 20 or -10'} className="mt-1" />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {currentRuleType?.needsPrompt
+                          ? 'Maximum points the AI can assign. AI returns between -points and +points.'
+                          : 'Positive = higher priority, negative = lower. Base score is 50, clamped to 0\u2013100.'}
+                      </p>
                     </div>
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" onClick={() => setShowPriorityRuleForm(false)}>Cancel</Button>
@@ -1381,6 +1643,107 @@ export default function ProjectSettings() {
                 variant="destructive"
                 onConfirm={() => { if (showDeletePriorityRule) handleDeletePriorityRule(showDeletePriorityRule) }}
               />
+
+              {/* AI Rule Assistant Dialog */}
+              <Dialog open={showAIAssistant} onOpenChange={setShowAIAssistant}>
+                <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+                  <DialogTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-purple-400" /> AI Rule Assistant
+                  </DialogTitle>
+                  <DialogDescription className="sr-only">AI-powered assistant for creating priority rules</DialogDescription>
+
+                  {/* Include issues checkbox */}
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={assistantIncludeIssues}
+                      onChange={e => setAssistantIncludeIssues(e.target.checked)}
+                      className="rounded border-border"
+                    />
+                    Include recent issues as context
+                  </label>
+
+                  {/* Chat messages */}
+                  <div className="flex-1 overflow-y-auto space-y-3 min-h-[200px] max-h-[400px] rounded-md border p-3">
+                    {assistantMessages.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-8">
+                        Describe the kind of priority rules you want. For example: "I want to prioritize database errors and payment failures."
+                      </p>
+                    )}
+                    {assistantMessages.map((m, i) => (
+                      <div key={i} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+                        <div className={cn(
+                          'rounded-lg px-3 py-2 text-sm max-w-[80%]',
+                          m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                        )}>
+                          {m.content}
+                        </div>
+                      </div>
+                    ))}
+                    {assistantLoading && (
+                      <div className="flex justify-start">
+                        <div className="bg-muted rounded-lg px-3 py-2 text-sm">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Suggestions */}
+                  {assistantSuggestions.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">Suggested Rules</p>
+                      {assistantSuggestions.map((s, i) => (
+                        <div key={i} className="rounded-md border p-3 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{s.name}</span>
+                              <span className={cn(
+                                'text-xs px-1.5 py-0.5 rounded',
+                                s.rule_type === 'ai_prompt' ? 'bg-purple-500/15 text-purple-400' : 'bg-muted text-muted-foreground'
+                              )}>
+                                {RULE_TYPES.find(t => t.value === s.rule_type)?.label || s.rule_type}
+                              </span>
+                              <span className="text-xs font-mono text-muted-foreground">
+                                {s.rule_type === 'ai_prompt' ? `\u00B1${s.points}` : `${s.points > 0 ? '+' : ''}${s.points}`} pts
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Button size="sm" variant="outline" onClick={() => handleAddSuggestion(s)}>
+                                <Check className="h-3.5 w-3.5 mr-1" /> Add
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setAssistantSuggestions(prev => prev.filter(x => x !== s))}>
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{s.explanation}</p>
+                          {s.pattern && (
+                            <p className="text-xs font-mono text-muted-foreground/60 truncate">
+                              {s.rule_type === 'ai_prompt' ? 'Prompt: ' : 'Pattern: '}{s.pattern}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Input */}
+                  <div className="flex gap-2">
+                    <Input
+                      value={assistantInput}
+                      onChange={e => setAssistantInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAssistantSend() } }}
+                      placeholder="Describe what you want to prioritize..."
+                      disabled={assistantLoading}
+                      className="flex-1"
+                    />
+                    <Button onClick={handleAssistantSend} disabled={assistantLoading || !assistantInput.trim()} size="icon">
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </>
           )}
 
@@ -1398,9 +1761,16 @@ export default function ProjectSettings() {
                 <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <CardTitle className="text-base">Rules</CardTitle>
                   {isAdmin && (
-                    <Button size="sm" variant="outline" onClick={openAddTagRule}>
-                      <Plus className="h-4 w-4 mr-1" /> Add Rule
-                    </Button>
+                    <div className="flex gap-2">
+                      {aiProviderConfigured && (
+                        <Button size="sm" variant="outline" onClick={openTagAssistant}>
+                          <Sparkles className="h-4 w-4 mr-1" /> AI Assistant
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" onClick={openAddTagRule}>
+                        <Plus className="h-4 w-4 mr-1" /> Add Rule
+                      </Button>
+                    </div>
                   )}
                 </CardHeader>
                 <CardContent>
@@ -1420,7 +1790,7 @@ export default function ProjectSettings() {
                                 {r.enabled ? 'Active' : 'Disabled'}
                               </button>
                               <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-primary/10 text-primary/80">
-                                {r.tag_key}:{r.tag_value}
+                                {r.rule_type === 'ai_prompt' ? `${r.tag_key}:*` : `${r.tag_key}:${r.tag_value}`}
                               </span>
                             </div>
                             {isAdmin && (
@@ -1430,7 +1800,19 @@ export default function ProjectSettings() {
                               </div>
                             )}
                           </div>
-                          <p className="mt-1 text-xs text-muted-foreground font-mono">pattern: {r.pattern}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {r.rule_type === 'ai_prompt' ? (
+                              <>
+                                <span className="inline-flex items-center gap-1 rounded bg-purple-500/15 text-purple-400 px-1.5 py-0.5 mr-1">
+                                  <Sparkles className="h-3 w-3" /> AI
+                                </span>
+                                {r.pattern.length > 60 ? r.pattern.slice(0, 60) + '...' : r.pattern}
+                                {r.threshold > 0 && <span className="ml-2 text-muted-foreground/60">at {r.threshold} events</span>}
+                              </>
+                            ) : (
+                              <span className="font-mono">pattern: {r.pattern}</span>
+                            )}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -1447,19 +1829,52 @@ export default function ProjectSettings() {
                       <label className="text-sm font-medium">Name</label>
                       <Input value={trName} onChange={e => setTrName(e.target.value)} placeholder="e.g. Payment errors" className="mt-1" />
                     </div>
-                    <div>
-                      <label className="text-sm font-medium">Title pattern</label>
-                      <Input value={trPattern} onChange={e => setTrPattern(e.target.value)} placeholder="e.g. Adyen|Stripe|payment" className="mt-1" />
-                      <p className="mt-1 text-xs text-muted-foreground">Plain text = contains match. Supports regex.</p>
-                    </div>
+                    {aiEnabled && aiProviderConfigured && (
+                      <div>
+                        <label className="text-sm font-medium">Type</label>
+                        <Select value={trRuleType} onChange={e => setTrRuleType(e.target.value as 'pattern' | 'ai_prompt')} className="mt-1">
+                          <option value="pattern">Pattern match</option>
+                          <option value="ai_prompt">AI Classification</option>
+                        </Select>
+                      </div>
+                    )}
+                    {trRuleType === 'ai_prompt' ? (
+                      <>
+                        <div>
+                          <label className="text-sm font-medium">AI Prompt</label>
+                          <textarea
+                            value={trPattern}
+                            onChange={e => setTrPattern(e.target.value)}
+                            placeholder="e.g. Classify this error by the team responsible: payments, platform, frontend, reservations"
+                            rows={4}
+                            className="mt-1 w-full rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                          <p className="mt-1 text-xs text-muted-foreground">Describe how the AI should classify the issue. It will receive the issue title, level, platform, and latest event data.</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Event Threshold</label>
+                          <Input type="number" min={1} value={trThreshold} onChange={e => setTrThreshold(e.target.value)} placeholder="e.g. 1" className="mt-1" />
+                          <p className="mt-1 text-xs text-muted-foreground">AI evaluates when the issue reaches this many events. Use 1 for first-event triage.</p>
+                        </div>
+                      </>
+                    ) : (
+                      <div>
+                        <label className="text-sm font-medium">Title pattern</label>
+                        <Input value={trPattern} onChange={e => setTrPattern(e.target.value)} placeholder="e.g. Adyen|Stripe|payment" className="mt-1" />
+                        <p className="mt-1 text-xs text-muted-foreground">Plain text = contains match. Supports regex.</p>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="text-sm font-medium">Tag key</label>
                         <Input value={trTagKey} onChange={e => setTrTagKey(e.target.value)} placeholder="e.g. team" className="mt-1" />
                       </div>
                       <div>
-                        <label className="text-sm font-medium">Tag value</label>
-                        <Input value={trTagValue} onChange={e => setTrTagValue(e.target.value)} placeholder="e.g. payment" className="mt-1" />
+                        <label className="text-sm font-medium">{trRuleType === 'ai_prompt' ? 'Valid values (comma-separated)' : 'Tag value'}</label>
+                        <Input value={trTagValue} onChange={e => setTrTagValue(e.target.value)} placeholder={trRuleType === 'ai_prompt' ? 'e.g. payments,platform,frontend' : 'e.g. payment'} className="mt-1" />
+                        {trRuleType === 'ai_prompt' && (
+                          <p className="mt-1 text-xs text-muted-foreground">Comma-separated list of allowed tag values. AI must pick from these.</p>
+                        )}
                       </div>
                     </div>
                     <div className="flex justify-end gap-2">
@@ -1479,6 +1894,199 @@ export default function ProjectSettings() {
                 variant="destructive"
                 onConfirm={() => { if (showDeleteTagRule) handleDeleteTagRule(showDeleteTagRule) }}
               />
+
+              {/* AI Tag Assistant Dialog */}
+              <Dialog open={showTagAssistant} onOpenChange={setShowTagAssistant}>
+                <DialogContent className="max-w-lg">
+                  <DialogTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-purple-400" /> AI Tag Assistant
+                  </DialogTitle>
+                  <DialogDescription className="sr-only">AI-powered assistant for creating tag rules</DialogDescription>
+                  <div className="mb-2">
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <input type="checkbox" checked={tagAssistantIncludeIssues} onChange={e => setTagAssistantIncludeIssues(e.target.checked)} className="rounded" />
+                      Include recent issues for context
+                    </label>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto space-y-2 mb-3">
+                    {tagAssistantMessages.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-4">
+                        Describe how you want to organize issues with tags. Example: &quot;Tag errors by team ownership based on the service that caused them&quot;
+                      </p>
+                    )}
+                    {tagAssistantMessages.map((m, i) => (
+                      <div key={i} className={cn('text-sm rounded-md px-3 py-2', m.role === 'user' ? 'bg-primary/10 ml-8' : 'bg-muted mr-8')}>
+                        {m.content}
+                      </div>
+                    ))}
+                    {tagAssistantLoading && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground px-3 py-2">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+                      </div>
+                    )}
+                  </div>
+                  {tagAssistantSuggestions.length > 0 && (
+                    <div className="space-y-2 mb-3">
+                      {tagAssistantSuggestions.map((s, i) => (
+                        <div key={i} className="rounded-md border border-purple-500/20 bg-purple-500/5 p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-medium">{s.name}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{s.explanation}</p>
+                              <p className="text-xs font-mono mt-1 text-muted-foreground/80">pattern: {s.pattern} &rarr; {s.tag_key}:{s.tag_value}</p>
+                            </div>
+                            <div className="flex gap-1 shrink-0">
+                              <Button size="sm" variant="outline" onClick={() => handleAddTagSuggestion(s)}>Add</Button>
+                              <Button size="sm" variant="ghost" onClick={() => setTagAssistantSuggestions(prev => prev.filter(x => x !== s))}>
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Input
+                      value={tagAssistantInput}
+                      onChange={e => setTagAssistantInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleTagAssistantSend() } }}
+                      placeholder="Describe how you want to tag issues..."
+                      disabled={tagAssistantLoading}
+                      className="flex-1"
+                    />
+                    <Button onClick={handleTagAssistantSend} disabled={tagAssistantLoading || !tagAssistantInput.trim()} size="icon">
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </>
+          )}
+
+          {activeSection === 'ai' && aiProviderConfigured && (
+            <>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">AI Integration</p>
+                <h2 className="text-xl font-semibold">AI Features</h2>
+                <p className="text-sm text-muted-foreground">
+                  Configure AI-powered features for this project. Provider: <span className="font-medium text-foreground">{aiProviderName || 'Unknown'}</span>
+                </p>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Master Toggle</CardTitle>
+                  <CardDescription>Enable or disable all AI features for this project.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={aiEnabled}
+                      onChange={e => setAiEnabled(e.target.checked)}
+                      className="h-4 w-4 rounded border-border accent-primary"
+                    />
+                    <span className="text-sm font-medium">Enable AI for this project</span>
+                  </label>
+                </CardContent>
+              </Card>
+
+              {aiEnabled && (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Feature Toggles</CardTitle>
+                      <CardDescription>Choose which AI features are active.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={aiTicketDescription}
+                          onChange={e => setAiTicketDescription(e.target.checked)}
+                          className="h-4 w-4 rounded border-border accent-primary"
+                        />
+                        <div>
+                          <span className="text-sm font-medium">Ticket Description Generation</span>
+                          <p className="text-xs text-muted-foreground">Generate structured descriptions when creating tickets from issues.</p>
+                        </div>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={aiMergeSuggestions}
+                          onChange={e => setAiMergeSuggestions(e.target.checked)}
+                          className="h-4 w-4 rounded border-border accent-primary"
+                        />
+                        <div>
+                          <span className="text-sm font-medium">Merge Suggestions</span>
+                          <p className="text-xs text-muted-foreground">Suggest duplicate issues that could be merged (runs every 5 minutes).</p>
+                        </div>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={aiRootCause}
+                          onChange={e => setAiRootCause(e.target.checked)}
+                          className="h-4 w-4 rounded border-border accent-primary"
+                        />
+                        <div>
+                          <span className="text-sm font-medium">Root Cause Analysis</span>
+                          <p className="text-xs text-muted-foreground">AI-generated root cause analysis for issues (Phase 2).</p>
+                        </div>
+                      </label>
+                    </CardContent>
+                  </Card>
+
+                  {aiUsage && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">Token Usage</CardTitle>
+                        <CardDescription>AI token consumption for this project.</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <p className="text-xs text-muted-foreground">Today</p>
+                            <p className="text-lg font-semibold">{aiUsage.today_tokens.toLocaleString()}</p>
+                            <p className="text-xs text-muted-foreground">{aiUsage.today_calls} calls</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-xs text-muted-foreground">This Week</p>
+                            <p className="text-lg font-semibold">{aiUsage.week_tokens.toLocaleString()}</p>
+                            <p className="text-xs text-muted-foreground">{aiUsage.week_calls} calls</p>
+                          </div>
+                        </div>
+                        {aiUsage.daily_budget > 0 && (
+                          <div className="mt-4">
+                            <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                              <span>Daily budget</span>
+                              <span>{aiUsage.today_tokens.toLocaleString()} / {aiUsage.daily_budget.toLocaleString()}</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={cn(
+                                  'h-full rounded-full transition-all',
+                                  aiUsage.today_tokens / aiUsage.daily_budget > 0.9 ? 'bg-red-500' :
+                                  aiUsage.today_tokens / aiUsage.daily_budget > 0.7 ? 'bg-amber-500' : 'bg-primary'
+                                )}
+                                style={{ width: `${Math.min(100, (aiUsage.today_tokens / aiUsage.daily_budget) * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
+              )}
+
+              <div className="flex justify-end">
+                <Button onClick={handleSaveAI} disabled={savingAI}>
+                  {savingAI ? 'Saving...' : 'Save AI Settings'}
+                </Button>
+              </div>
             </>
           )}
 
@@ -2112,6 +2720,90 @@ export default function ProjectSettings() {
               <Button variant="outline" onClick={() => setShowAlertForm(false)}>Cancel</Button>
               <Button onClick={handleSaveAlert}>{editingAlert ? 'Save' : 'Add'}</Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Alert Assistant Dialog */}
+      <Dialog open={showAlertAssistant} onOpenChange={setShowAlertAssistant}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-purple-400" /> AI Alert Assistant
+          </DialogTitle>
+          <DialogDescription className="sr-only">AI-powered assistant for creating alert configurations</DialogDescription>
+
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={alertAssistantIncludeIssues}
+              onChange={e => setAlertAssistantIncludeIssues(e.target.checked)}
+              className="rounded border-border"
+            />
+            Include recent issues as context
+          </label>
+
+          <div className="flex-1 overflow-y-auto space-y-3 min-h-[200px] max-h-[400px] rounded-md border p-3">
+            {alertAssistantMessages.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                Describe the alerts you need. For example: "Notify me of fatal errors and high-velocity issues."
+              </p>
+            )}
+            {alertAssistantMessages.map((m, i) => (
+              <div key={i} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+                <div className={cn(
+                  'rounded-lg px-3 py-2 text-sm max-w-[80%]',
+                  m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                )}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {alertAssistantLoading && (
+              <div className="flex justify-start">
+                <div className="bg-muted rounded-lg px-3 py-2 text-sm">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {alertAssistantSuggestions.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Suggested Alerts</p>
+              {alertAssistantSuggestions.map((s, i) => (
+                <div key={i} className="rounded-md border p-3 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{s.name}</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">{s.alert_type}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="outline" onClick={() => handleAddAlertSuggestion(s)}>
+                        <Check className="h-3.5 w-3.5 mr-1" /> Add
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setAlertAssistantSuggestions(prev => prev.filter(x => x !== s))}>
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{s.explanation}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Input
+              value={alertAssistantInput}
+              onChange={e => setAlertAssistantInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAlertAssistantSend() } }}
+              placeholder="Describe what alerts you need..."
+              disabled={alertAssistantLoading}
+              className="flex-1"
+            />
+            <Button onClick={handleAlertAssistantSend} disabled={alertAssistantLoading || !alertAssistantInput.trim()} size="icon">
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	activitypkg "github.com/darkspock/gosnag/internal/activity"
+	aipkg "github.com/darkspock/gosnag/internal/ai"
 	"github.com/darkspock/gosnag/internal/alert"
 	"github.com/darkspock/gosnag/internal/comment"
 	"github.com/darkspock/gosnag/internal/auth"
@@ -75,7 +77,6 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	projectHandler := project.NewHandler(queries, statsCache)
 	issueHandler := issue.NewHandler(queries, database)
 	userHandler := user.NewHandler(queries)
-	alertHandler := alert.NewHandler(queries)
 	jiraHandler := jira.NewHandler(queries, cfg)
 	githubHandler := github.NewHandler(queries, cfg)
 	activityHandler := activitypkg.NewHandler(queries)
@@ -102,15 +103,21 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	}
 	uploadHandler := upload.NewHandler(uploadStorage)
 	sourceCodeHandler := sourcecode.NewHandler(queries)
-	priorityHandler := priority.NewHandler(queries)
-	tagsHandler := tags.NewHandler(queries)
 	oauthHandler := auth.NewOAuthHandler(queries, cfg)
+
+	aiService := aipkg.NewService(queries, cfg)
+	aiHandler := aipkg.NewHandler(queries, aiService, cfg)
+	priorityHandler := priority.NewHandler(queries, aiService)
+	alertHandler := alert.NewHandler(queries, aiService)
+	tagsHandler := tags.NewHandler(queries, aiService)
 
 	alertService := alert.NewService(queries, cfg)
 
 	ticketHandler := ticket.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
 		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
-	})
+	}, func(projectID uuid.UUID, issue db.Issue, isNew bool) {
+		alertService.Notify(projectID, issue, isNew)
+	}, uploadStorage)
 	commentHandler := comment.NewHandler(queries, func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID) {
 		alertService.NotifyFollowers(issueID, projectID, issueTitle, action, excludeUserID)
 	})
@@ -122,8 +129,11 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 		},
 		func(projectID uuid.UUID, iss db.Issue, eventData json.RawMessage) {
 			statsCache.Invalidate()
-			go priority.Evaluate(context.Background(), queries, projectID, iss, eventData)
-			go tags.AutoTag(context.Background(), queries, projectID, iss, eventData)
+			go priority.Evaluate(context.Background(), queries, aiService, projectID, iss, eventData,
+				func(pID uuid.UUID, updatedIssue db.Issue, _, _ int32) {
+					alertService.Notify(pID, updatedIssue, false)
+				})
+			go tags.AutoTag(context.Background(), queries, aiService, projectID, iss, eventData)
 			go n1.ExtractAndStore(context.Background(), queries, projectID, eventData)
 		},
 	)
@@ -208,9 +218,15 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				// Source code repository
 				r.With(auth.RequireAdmin).Post("/repo/test", sourceCodeHandler.TestConnection)
 
+				// AI
+				r.Get("/ai/status", aiHandler.GetAIStatus)
+				r.Get("/ai/usage", aiHandler.GetTokenUsage)
+
 				// Deploys
 				r.Get("/deploys", sourceCodeHandler.ListDeploys)
 				r.With(auth.RequireWritePermission).Post("/deploys", sourceCodeHandler.Deploy)
+				r.Get("/deploys/{deploy_id}/analysis", aiHandler.GetDeployAnalysis)
+				r.Get("/deploy-health", aiHandler.GetLatestDeployHealth)
 				r.Route("/github/rules", func(r chi.Router) {
 					r.Get("/", githubHandler.ListRules)
 					r.With(auth.RequireAdmin).Post("/", githubHandler.CreateRule)
@@ -225,6 +241,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 					r.With(auth.RequireAdmin).Put("/{rule_id}", priorityHandler.UpdateRule)
 					r.With(auth.RequireAdmin).Delete("/{rule_id}", priorityHandler.DeleteRule)
 					r.With(auth.RequireAdmin).Post("/recalc", priorityHandler.RecalcAll)
+					r.With(auth.RequireAdmin).Post("/suggest", priorityHandler.SuggestRules)
 				})
 
 				// Tag rules per project
@@ -233,6 +250,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 					r.With(auth.RequireAdmin).Post("/", tagsHandler.CreateRule)
 					r.With(auth.RequireAdmin).Put("/{rule_id}", tagsHandler.UpdateRule)
 					r.With(auth.RequireAdmin).Delete("/{rule_id}", tagsHandler.DeleteRule)
+					r.With(auth.RequireAdmin).Post("/suggest", tagsHandler.SuggestTags)
 				})
 				r.Get("/tags", tagsHandler.ListDistinctTags)
 
@@ -242,6 +260,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 					r.With(auth.RequireAdmin).Post("/", alertHandler.Create)
 					r.With(auth.RequireAdmin).Put("/{alert_id}", alertHandler.Update)
 					r.With(auth.RequireAdmin).Delete("/{alert_id}", alertHandler.Delete)
+					r.With(auth.RequireAdmin).Post("/suggest", alertHandler.SuggestAlerts)
 				})
 			})
 		})
@@ -264,6 +283,12 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.Get("/activities", activityHandler.List)
 				r.Get("/suspect-commits", sourceCodeHandler.SuspectCommits)
 				r.Get("/release-info", sourceCodeHandler.GetReleaseInfo)
+				r.Get("/merge-suggestion", aiHandler.GetMergeSuggestion)
+				r.With(auth.RequireWritePermission).Post("/merge-suggestion/accept", aiHandler.AcceptMergeSuggestion)
+				r.With(auth.RequireWritePermission).Post("/merge-suggestion/dismiss", aiHandler.DismissMergeSuggestion)
+				r.With(auth.RequireWritePermission).Post("/analyze", aiHandler.AnalyzeIssue)
+				r.Get("/analysis", aiHandler.GetAnalysis)
+				r.Get("/analyses", aiHandler.ListAnalyses)
 				r.Get("/ticket", ticketHandler.GetByIssue)
 				r.With(auth.RequireWritePermission).Post("/ticket", ticketHandler.Create)
 				r.With(auth.RequireWritePermission).Post("/jira", jiraHandler.CreateTicket)
@@ -291,6 +316,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.Get("/attachments", ticketHandler.ListAttachments)
 				r.With(auth.RequireWritePermission).Post("/attachments", ticketHandler.AddAttachment)
 				r.With(auth.RequireWritePermission).Delete("/attachments/{attachment_id}", ticketHandler.DeleteAttachment)
+				r.With(auth.RequireWritePermission).Post("/generate-description", aiHandler.GenerateTicketDescription)
 			})
 		})
 
@@ -306,8 +332,8 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 	// File uploads
 	r.Route("/api/v1/upload", func(r chi.Router) {
 		r.Use(auth.MiddlewareWithToken(queries, cfg.BaseURL))
-		r.Post("/", uploadHandler.Upload)
-		r.Post("/doc", uploadHandler.UploadDoc)
+		r.With(auth.RequireWritePermission).Post("/", uploadHandler.Upload)
+		r.With(auth.RequireWritePermission).Post("/doc", uploadHandler.UploadDoc)
 	})
 
 	// Serve uploaded files with safe headers
@@ -329,6 +355,12 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			}
 			fileServer.ServeHTTP(w, r)
+			return
+		}
+		// Static assets that don't exist should 404, not get the SPA fallback
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".js" || ext == ".css" || ext == ".map" || ext == ".woff" || ext == ".woff2" || ext == ".png" || ext == ".jpg" || ext == ".svg" || ext == ".ico" {
+			http.NotFound(w, r)
 			return
 		}
 		// SPA fallback: serve index.html for client-side routes

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/darkspock/gosnag/internal/ai"
 	"github.com/darkspock/gosnag/internal/database/db"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -13,11 +15,12 @@ import (
 )
 
 type Handler struct {
-	queries *db.Queries
+	queries   *db.Queries
+	aiService *ai.Service
 }
 
-func NewHandler(queries *db.Queries) *Handler {
-	return &Handler{queries: queries}
+func NewHandler(queries *db.Queries, aiService *ai.Service) *Handler {
+	return &Handler{queries: queries, aiService: aiService}
 }
 
 type CreateAlertRequest struct {
@@ -190,6 +193,130 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// SuggestAlerts handles POST /projects/{project_id}/alerts/suggest
+// Conversational AI assistant for creating alert configurations (uses thinking model).
+func (h *Handler) SuggestAlerts(w http.ResponseWriter, r *http.Request) {
+	projectID, err := uuid.Parse(chi.URLParam(r, "project_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	if h.aiService == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI not configured")
+		return
+	}
+
+	var req struct {
+		IncludeIssues bool         `json:"include_issues"`
+		Messages      []ai.Message `json:"messages"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Messages) == 0 {
+		writeError(w, http.StatusBadRequest, "messages required")
+		return
+	}
+
+	// Build context: existing alerts
+	alerts, _ := h.queries.ListAlertConfigs(r.Context(), projectID)
+	var alertsCtx strings.Builder
+	if len(alerts) > 0 {
+		alertsCtx.WriteString("## Existing Alerts\n")
+		for _, a := range alerts {
+			status := "enabled"
+			if !a.Enabled {
+				status = "disabled"
+			}
+			alertsCtx.WriteString(fmt.Sprintf("- %s alert (%s)", a.AlertType, status))
+			if a.LevelFilter != "" {
+				alertsCtx.WriteString(fmt.Sprintf(", level: %s", a.LevelFilter))
+			}
+			if a.TitlePattern != "" {
+				alertsCtx.WriteString(fmt.Sprintf(", pattern: %s", a.TitlePattern))
+			}
+			alertsCtx.WriteString("\n")
+		}
+	} else {
+		alertsCtx.WriteString("## Existing Alerts\nNone configured yet.\n")
+	}
+
+	// Optionally include recent issues
+	var issuesCtx strings.Builder
+	if req.IncludeIssues {
+		issues, err := h.queries.ListRecentIssuesForContext(r.Context(), projectID)
+		if err == nil && len(issues) > 0 {
+			issuesCtx.WriteString("\n## Recent Issues (last 20)\n")
+			for _, iss := range issues {
+				issuesCtx.WriteString(fmt.Sprintf("- [%s] %s (platform: %s, events: %d, culprit: %s)\n",
+					iss.Level, iss.Title, iss.Platform, iss.EventCount, iss.Culprit))
+			}
+		}
+	}
+
+	systemPrompt := fmt.Sprintf(`You are an AI assistant that helps configure alert rules for an error tracking system.
+Alerts notify teams via email or Slack when issues match certain conditions.
+
+Each alert has:
+- alert_type: "email" or "slack"
+- conditions: a JSON condition tree that filters which issues trigger the alert
+
+The conditions system supports these operators:
+- level_is: matches error level (value: "error", "warning", "fatal", "info")
+- platform_is: matches platform name
+- title_contains: regex match on issue title and event data
+- title_not_contains: regex negative match
+- total_events: numeric comparison on total event count (operators: gte, lte, eq, gt, lt)
+- velocity_1h: events in the last hour
+- velocity_24h: events in the last 24 hours
+- user_count: unique affected users
+- priority: numeric comparison on the issue's priority score (0-100, base 50). Alerts with priority conditions fire when the priority changes after rule evaluation.
+
+Conditions can be grouped with "and" / "or" operators.
+
+When suggesting alerts, respond with valid JSON in this exact format:
+{
+  "message": "Your conversational response explaining the suggestions",
+  "suggestions": [
+    {
+      "name": "Descriptive name for this alert",
+      "alert_type": "email or slack",
+      "conditions": {
+        "operator": "and",
+        "conditions": [
+          { "type": "level_is", "value": "fatal" },
+          { "type": "total_events", "operator": "gte", "value": "5" }
+        ]
+      },
+      "explanation": "Why this alert is useful"
+    }
+  ]
+}
+
+Keep suggestions practical. Suggest email alerts by default unless the user mentions Slack.
+
+%s%s`, alertsCtx.String(), issuesCtx.String())
+
+	resp, err := h.aiService.ThinkingChat(r.Context(), projectID, "alert_suggest", ai.ChatRequest{
+		SystemPrompt: systemPrompt,
+		Messages:     req.Messages,
+		MaxTokens:    2048,
+		Temperature:  0.3,
+		JSON:         true,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("AI call failed: %v", err))
+		return
+	}
+
+	content := stripCodeFences(resp.Content)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(content))
+}
+
 func validateAlertConfig(alertType string, raw json.RawMessage) error {
 	switch alertType {
 	case "email":
@@ -309,4 +436,19 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func stripCodeFences(s string) string {
+	s = strings.TrimSpace(s)
+	fence := "```"
+	if strings.HasPrefix(s, fence) {
+		if idx := strings.Index(s, "\n"); idx != -1 {
+			s = s[idx+1:]
+		}
+		if idx := strings.LastIndex(s, fence); idx != -1 {
+			s = s[:idx]
+		}
+		s = strings.TrimSpace(s)
+	}
+	return s
 }

@@ -11,9 +11,21 @@ import (
 )
 
 func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
+	projectID, err := uuid.Parse(chi.URLParam(r, "project_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
 	ticketID, err := uuid.Parse(chi.URLParam(r, "ticket_id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid ticket id")
+		return
+	}
+
+	// Verify ticket belongs to project
+	ticket, err := h.queries.GetTicket(r.Context(), ticketID)
+	if err != nil || ticket.ProjectID != projectID {
+		writeError(w, http.StatusNotFound, "ticket not found")
 		return
 	}
 
@@ -129,12 +141,27 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get attachment URL before deleting
+	att, err := h.queries.GetAttachment(r.Context(), db.GetAttachmentParams{
+		ID:       attachmentID,
+		TicketID: ticketID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+
 	if err := h.queries.DeleteAttachment(r.Context(), db.DeleteAttachmentParams{
 		ID:       attachmentID,
 		TicketID: ticketID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete attachment")
 		return
+	}
+
+	// Delete the stored file
+	if h.fileDeleter != nil {
+		h.fileDeleter.Delete(r.Context(), att.Url)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

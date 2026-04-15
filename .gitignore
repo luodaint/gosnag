@@ -28,3 +28,4 @@ web/node_modules/
 
 # Claude Code (local config, may contain infra secrets)
 .claude/
+uploads/

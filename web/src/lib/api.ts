@@ -148,6 +148,8 @@ export const api = {
     request<void>(`/projects/${projectId}/priority-rules/${ruleId}`, { method: 'DELETE' }),
   recalcPriority: (projectId: string) =>
     request<{ recalculated: number }>(`/projects/${projectId}/priority-rules/recalc`, { method: 'POST' }),
+  suggestPriorityRules: (projectId: string, data: { include_issues: boolean; messages: { role: string; content: string }[] }) =>
+    request<{ message: string; suggestions: RuleSuggestion[] }>(`/projects/${projectId}/priority-rules/suggest`, { method: 'POST', body: JSON.stringify(data) }),
 
   // Tags
   listIssueTags: (projectId: string, issueId: string) => request<IssueTag[]>(`/projects/${projectId}/issues/${issueId}/tags`),
@@ -157,12 +159,14 @@ export const api = {
     request<void>(`/projects/${projectId}/issues/${issueId}/tags`, { method: 'DELETE', body: JSON.stringify({ key, value }) }),
   listDistinctTags: (projectId: string) => request<{ key: string; value: string }[]>(`/projects/${projectId}/tags`),
   listTagRules: (projectId: string) => request<TagRule[]>(`/projects/${projectId}/tag-rules`),
-  createTagRule: (projectId: string, data: { name: string; pattern: string; tag_key: string; tag_value: string; enabled: boolean }) =>
+  createTagRule: (projectId: string, data: { name: string; rule_type?: string; pattern: string; tag_key: string; tag_value: string; threshold?: number; enabled: boolean }) =>
     request<TagRule>(`/projects/${projectId}/tag-rules`, { method: 'POST', body: JSON.stringify(data) }),
-  updateTagRule: (projectId: string, ruleId: string, data: { name: string; pattern: string; tag_key: string; tag_value: string; enabled: boolean }) =>
+  updateTagRule: (projectId: string, ruleId: string, data: { name: string; rule_type?: string; pattern: string; tag_key: string; tag_value: string; threshold?: number; enabled: boolean }) =>
     request<TagRule>(`/projects/${projectId}/tag-rules/${ruleId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTagRule: (projectId: string, ruleId: string) =>
     request<void>(`/projects/${projectId}/tag-rules/${ruleId}`, { method: 'DELETE' }),
+  suggestTagRules: (projectId: string, data: { include_issues: boolean; messages: { role: string; content: string }[] }) =>
+    request<{ message: string; suggestions: TagSuggestion[] }>(`/projects/${projectId}/tag-rules/suggest`, { method: 'POST', body: JSON.stringify(data) }),
 
   // Jira
   testJiraConnection: (projectId: string) =>
@@ -276,6 +280,32 @@ export const api = {
     request<AlertConfig>(`/projects/${projectId}/alerts/${alertId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAlert: (projectId: string, alertId: string) =>
     request<void>(`/projects/${projectId}/alerts/${alertId}`, { method: 'DELETE' }),
+  suggestAlerts: (projectId: string, data: { include_issues: boolean; messages: { role: string; content: string }[] }) =>
+    request<{ message: string; suggestions: AlertSuggestion[] }>(`/projects/${projectId}/alerts/suggest`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // AI
+  getAIStatus: (projectId: string) =>
+    request<{ provider_configured: boolean; provider: string }>(`/projects/${projectId}/ai/status`),
+  getAIUsage: (projectId: string) =>
+    request<AIUsage>(`/projects/${projectId}/ai/usage`),
+  generateDescription: (projectId: string, ticketId: string) =>
+    request<{ description: string }>(`/projects/${projectId}/tickets/${ticketId}/generate-description`, { method: 'POST' }),
+  getMergeSuggestion: (projectId: string, issueId: string) =>
+    request<{ suggestion: MergeSuggestion | null }>(`/projects/${projectId}/issues/${issueId}/merge-suggestion`),
+  acceptMergeSuggestion: (projectId: string, issueId: string) =>
+    request<{ status: string }>(`/projects/${projectId}/issues/${issueId}/merge-suggestion/accept`, { method: 'POST' }),
+  dismissMergeSuggestion: (projectId: string, issueId: string) =>
+    request<{ status: string }>(`/projects/${projectId}/issues/${issueId}/merge-suggestion/dismiss`, { method: 'POST' }),
+  analyzeIssue: (projectId: string, issueId: string) =>
+    request<AIAnalysis>(`/projects/${projectId}/issues/${issueId}/analyze`, { method: 'POST' }),
+  getAnalysis: (projectId: string, issueId: string) =>
+    request<{ analysis: AIAnalysis | null }>(`/projects/${projectId}/issues/${issueId}/analysis`),
+  listAnalyses: (projectId: string, issueId: string) =>
+    request<{ analyses: AIAnalysis[] }>(`/projects/${projectId}/issues/${issueId}/analyses`),
+  getDeployHealth: (projectId: string) =>
+    request<{ analysis: DeployAnalysis | null }>(`/projects/${projectId}/deploy-health`),
+  getDeployAnalysis: (projectId: string, deployId: string) =>
+    request<{ analysis: DeployAnalysis | null }>(`/projects/${projectId}/deploys/${deployId}/analysis`),
 
   // Global tokens
   listGlobalTokens: () => request<any[]>('/tokens'),
@@ -332,6 +362,14 @@ export interface Project {
   repo_path_strip: string
   issue_display_mode: string
   group_id: string | null
+  ai_enabled: boolean
+  ai_model: string
+  ai_merge_suggestions: boolean
+  ai_auto_merge: boolean
+  ai_anomaly_detection: boolean
+  ai_ticket_description: boolean
+  ai_root_cause: boolean
+  ai_triage: boolean
   created_at: string
   total_issues?: number
   open_issues?: number
@@ -448,9 +486,11 @@ export interface TagRule {
   id: string
   project_id: string
   name: string
+  rule_type: string
   pattern: string
   tag_key: string
   tag_value: string
+  threshold: number
   enabled: boolean
   created_at: string
   updated_at: string
@@ -479,6 +519,16 @@ export type PriorityRuleData = {
   threshold: number
   points: number
   enabled: boolean
+}
+
+export interface RuleSuggestion {
+  name: string
+  rule_type: string
+  pattern: string
+  operator?: string
+  threshold?: number
+  points: number
+  explanation: string
 }
 
 export interface JiraRule {
@@ -635,5 +685,66 @@ export interface AlertConfig {
   min_velocity_1h: number
   exclude_pattern: string
   conditions: object | null
+  created_at: string
+}
+
+export interface AlertSuggestion {
+  name: string
+  alert_type: string
+  conditions: object
+  explanation: string
+}
+
+export interface TagSuggestion {
+  name: string
+  pattern: string
+  tag_key: string
+  tag_value: string
+  explanation: string
+}
+
+export interface MergeSuggestion {
+  id: string
+  issue_id: string
+  target_issue_id: string
+  target_issue_title: string
+  confidence: number
+  reason: string
+  status: string
+  created_at: string
+}
+
+export interface AIUsage {
+  today_tokens: number
+  today_calls: number
+  week_tokens: number
+  week_calls: number
+  daily_budget: number
+}
+
+export interface AIAnalysis {
+  id: string
+  issue_id: string
+  project_id: string
+  summary: string
+  evidence: string[]
+  suggested_fix: string
+  model: string
+  version: number
+  created_at: string
+}
+
+export interface DeployAnalysis {
+  id: string
+  deploy_id: string
+  project_id: string
+  severity: string
+  summary: string
+  details: string
+  likely_deploy_caused: boolean
+  recommended_action: string
+  new_issues_count: number
+  spiked_issues_count: number
+  reopened_issues_count: number
   created_at: string
 }

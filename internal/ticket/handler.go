@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -19,13 +20,27 @@ import (
 // NotifyFunc is called to notify followers of changes.
 type NotifyFunc func(issueID, projectID uuid.UUID, issueTitle, action string, excludeUserID *uuid.UUID)
 
-type Handler struct {
-	queries  *db.Queries
-	notifyFn NotifyFunc
+// AlertFunc sends project-level alerts (email/slack) for an issue event.
+type AlertFunc func(projectID uuid.UUID, issue db.Issue, isNew bool)
+
+// FileDeleter can delete a stored file by URL.
+type FileDeleter interface {
+	Delete(ctx context.Context, url string) error
 }
 
-func NewHandler(queries *db.Queries, notifyFn NotifyFunc) *Handler {
-	return &Handler{queries: queries, notifyFn: notifyFn}
+type Handler struct {
+	queries     *db.Queries
+	notifyFn    NotifyFunc
+	alertFn     AlertFunc
+	fileDeleter FileDeleter
+}
+
+func NewHandler(queries *db.Queries, notifyFn NotifyFunc, alertFn AlertFunc, fileDeleter ...FileDeleter) *Handler {
+	h := &Handler{queries: queries, notifyFn: notifyFn, alertFn: alertFn}
+	if len(fileDeleter) > 0 {
+		h.fileDeleter = fileDeleter[0]
+	}
+	return h
 }
 
 // Create creates a ticket for an issue.
@@ -385,18 +400,31 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 				if status == workflow.StatusWontfix {
 					issueStatus = "ignored"
 				}
-				h.queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
+
+				updateParams := db.UpdateIssueStatusParams{
 					ID:     ticket.IssueID.UUID,
 					Status: issueStatus,
-				})
-				if status == workflow.StatusDone {
-					h.queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
-						ID:         ticket.IssueID.UUID,
-						Status:     "resolved",
-						ResolvedAt: sql.NullTime{Time: time.Now(), Valid: true},
-					})
 				}
+				if status == workflow.StatusDone {
+					now := time.Now()
+					updateParams.ResolvedAt = sql.NullTime{Time: now, Valid: true}
+					// Apply project default cooldown
+					proj, err := h.queries.GetProject(r.Context(), ticket.ProjectID)
+					if err == nil && proj.DefaultCooldownMinutes > 0 {
+						cooldownEnd := now.Add(time.Duration(proj.DefaultCooldownMinutes) * time.Minute)
+						updateParams.CooldownUntil = sql.NullTime{Time: cooldownEnd, Valid: true}
+					}
+				}
+				h.queries.UpdateIssueStatus(r.Context(), updateParams)
 				activity.Record(r.Context(), h.queries, ticket.IssueID.UUID, &ticket.ID, nil, "status_changed", "", issueStatus, map[string]string{"reason": "ticket_" + status})
+
+				// Send project-level alert notifications (email/slack)
+				if h.alertFn != nil {
+					issue, err := h.queries.GetIssue(r.Context(), ticket.IssueID.UUID)
+					if err == nil {
+						go h.alertFn(ticket.ProjectID, issue, false)
+					}
+				}
 			}
 
 			// When ticket is reopened (done/wontfix -> acknowledged), reopen the linked issue

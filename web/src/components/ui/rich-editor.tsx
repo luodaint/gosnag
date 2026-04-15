@@ -196,7 +196,7 @@ export function RichViewer({ content, className }: { content: string; className?
   if (!editor) return null
 
   return (
-    <div className={cn('prose prose-sm prose-invert max-w-none [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs [&_p]:my-1.5 [&_img]:rounded-md [&_img]:max-w-full [&_blockquote]:border-l-2 [&_blockquote]:border-primary/30 [&_blockquote]:pl-3', className)}>
+    <div className={cn('prose prose-sm prose-invert max-w-none [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:rounded [&_code]:text-xs [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_p]:my-1.5 [&_img]:rounded-md [&_img]:max-w-full [&_blockquote]:border-l-2 [&_blockquote]:border-primary/30 [&_blockquote]:pl-3 [&_strong]:text-white [&_strong]:font-semibold [&_h3]:text-white [&_h3]:font-semibold [&_h3]:text-sm [&_h3]:mt-4 [&_h3]:mb-1 [&_h2]:text-white [&_h2]:font-semibold [&_h2]:text-base [&_h2]:mt-4 [&_h2]:mb-1', className)}>
       <EditorContent editor={editor} />
     </div>
   )

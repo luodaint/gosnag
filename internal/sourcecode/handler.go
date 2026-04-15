@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
@@ -11,12 +12,24 @@ import (
 	"github.com/google/uuid"
 )
 
+type cacheEntry struct {
+	commits []Commit
+	fetched time.Time
+}
+
+const cacheTTL = 10 * time.Minute
+
 type Handler struct {
 	queries *db.Queries
+	mu      sync.RWMutex
+	cache   map[string]cacheEntry // key: issueID
 }
 
 func NewHandler(queries *db.Queries) *Handler {
-	return &Handler{queries: queries}
+	return &Handler{
+		queries: queries,
+		cache:   make(map[string]cacheEntry),
+	}
 }
 
 // TestConnection tests the source code repository connection.
@@ -68,6 +81,16 @@ func (h *Handler) SuspectCommits(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid issue id")
 		return
 	}
+
+	// Check cache first
+	cacheKey := issueID.String()
+	h.mu.RLock()
+	if entry, ok := h.cache[cacheKey]; ok && time.Since(entry.fetched) < cacheTTL {
+		h.mu.RUnlock()
+		writeJSON(w, http.StatusOK, map[string]any{"commits": entry.commits})
+		return
+	}
+	h.mu.RUnlock()
 
 	// Verify issue belongs to this project
 	issue, err := h.queries.GetIssue(r.Context(), issueID)
@@ -131,6 +154,11 @@ func (h *Handler) SuspectCommits(w http.ResponseWriter, r *http.Request) {
 	if len(commits) > 5 {
 		commits = commits[:5]
 	}
+
+	// Cache the result
+	h.mu.Lock()
+	h.cache[cacheKey] = cacheEntry{commits: commits, fetched: time.Now()}
+	h.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]any{"commits": commits})
 }
