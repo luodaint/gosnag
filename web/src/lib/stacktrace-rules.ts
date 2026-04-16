@@ -140,6 +140,35 @@ function matchesPattern(path: string, patterns: string[]): boolean {
   })
 }
 
+function matchesBuiltInAppPath(path: string): boolean {
+  return [
+    /(^|\/)application\//,
+    /(^|\/)app\//,
+    /(^|\/)src\//,
+    /(^|\/)(backend|service|api|routes|controllers)\//,
+    /(^|\/)(config|database|db)\//,
+    /(^|\/)lib\//,
+  ].some(pattern => pattern.test(path))
+}
+
+function matchesBuiltInFrameworkPath(path: string): boolean {
+  return [
+    /(^|\/)(system|framework)\//,
+    /(^|\/)(fastapi|starlette|pydantic|uvicorn|django)\//,
+    /(^|\/)(actionpack|activerecord|activesupport)\//,
+    /(^|\/)org\/springframework\//,
+    /(^|\/)(gems|ruby|\.m2|gradle\/caches)\//,
+  ].some(pattern => pattern.test(path))
+}
+
+function matchesBuiltInExternalPath(path: string): boolean {
+  return [
+    /(^|\/)(vendor|node_modules|site-packages|dist-packages)\//,
+    /(^|\/)vendor\/bundle\//,
+    /(^|\/)boot-inf\/lib\//,
+  ].some(pattern => pattern.test(path))
+}
+
 export function classifyStackFrame(filename: string, rules?: Partial<StacktraceRules> | null, inApp?: boolean): StackFrameKind {
   const normalizedPath = filename.replace(/\\/g, '/')
   const normalizedRules = normalizeStacktraceRules(rules)
@@ -147,10 +176,11 @@ export function classifyStackFrame(filename: string, rules?: Partial<StacktraceR
   if (matchesPattern(normalizedPath, normalizedRules.app_patterns)) return 'app'
   if (matchesPattern(normalizedPath, normalizedRules.framework_patterns)) return 'framework'
   if (matchesPattern(normalizedPath, normalizedRules.external_patterns)) return 'external'
-  if (inApp) return 'app'
 
   const lower = normalizedPath.toLowerCase()
-  if (/(^|\/)(vendor|node_modules|site-packages|dist-packages)\//.test(lower)) return 'external'
-  if (/(^|\/)(system|framework|gems|ruby|\.m2|gradle\/caches)\//.test(lower)) return 'framework'
+  if (matchesBuiltInExternalPath(lower)) return 'external'
+  if (matchesBuiltInFrameworkPath(lower)) return 'framework'
+  if (matchesBuiltInAppPath(lower)) return 'app'
+  if (inApp) return 'app'
   return 'external'
 }

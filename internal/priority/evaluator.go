@@ -96,6 +96,7 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 
 		// New engine: if conditions JSONB is set, use it
 		if rule.Conditions.Valid {
+			slog.Debug("priority: using conditions engine", "rule_id", rule.ID, "rule_name", rule.Name)
 			var group conditions.Group
 			if err := json.Unmarshal(rule.Conditions.RawMessage, &group); err == nil {
 				matched = conditions.Evaluate(group, evalCtx)
@@ -130,6 +131,7 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 			case "title_contains":
 				if rule.Pattern != "" {
 					matched = matchesPattern(rule.Pattern, searchText)
+					slog.Debug("priority: title_contains", "rule_id", rule.ID, "pattern", rule.Pattern, "matched", matched, "issue_title", issue.Title)
 				}
 
 			case "title_not_contains":
@@ -162,6 +164,8 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 	if score > 100 {
 		score = 100
 	}
+
+	slog.Debug("priority: evaluation complete", "issue_id", issue.ID, "issue_title", issue.Title, "current_priority", issue.Priority, "new_score", score)
 
 	// Only update if changed
 	if score != issue.Priority {
@@ -258,6 +262,7 @@ func evaluateWithRules(ctx context.Context, queries *db.Queries, aiService *ai.S
 			case "title_contains":
 				if rule.Pattern != "" {
 					matched = matchesPattern(rule.Pattern, searchText)
+					slog.Debug("priority: title_contains", "rule_id", rule.ID, "pattern", rule.Pattern, "matched", matched, "issue_title", issue.Title)
 				}
 			case "title_not_contains":
 				if rule.Pattern != "" {
