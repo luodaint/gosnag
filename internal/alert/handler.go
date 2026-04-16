@@ -62,6 +62,34 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toSafeAlerts(configs))
 }
 
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	projectID, err := uuid.Parse(chi.URLParam(r, "project_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	alertID, err := uuid.Parse(chi.URLParam(r, "alert_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid alert id")
+		return
+	}
+
+	configs, err := h.queries.ListAlertConfigs(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load alert config")
+		return
+	}
+
+	for _, config := range configs {
+		if config.ID == alertID {
+			writeJSON(w, http.StatusOK, toFullAlert(config))
+			return
+		}
+	}
+
+	writeError(w, http.StatusNotFound, "alert config not found")
+}
+
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	projectID, err := uuid.Parse(chi.URLParam(r, "project_id"))
 	if err != nil {
@@ -349,6 +377,29 @@ func toSafeAlert(a db.AlertConfig) map[string]any {
 		"project_id":      a.ProjectID,
 		"alert_type":      a.AlertType,
 		"config":          redactAlertConfig(a.AlertType, a.Config),
+		"enabled":         a.Enabled,
+		"level_filter":    a.LevelFilter,
+		"title_pattern":   a.TitlePattern,
+		"min_events":      a.MinEvents,
+		"min_velocity_1h": a.MinVelocity1h,
+		"exclude_pattern": a.ExcludePattern,
+		"created_at":      a.CreatedAt,
+		"updated_at":      a.UpdatedAt,
+	}
+	if a.Conditions.Valid {
+		m["conditions"] = a.Conditions.RawMessage
+	} else {
+		m["conditions"] = nil
+	}
+	return m
+}
+
+func toFullAlert(a db.AlertConfig) map[string]any {
+	m := map[string]any{
+		"id":              a.ID,
+		"project_id":      a.ProjectID,
+		"alert_type":      a.AlertType,
+		"config":          a.Config,
 		"enabled":         a.Enabled,
 		"level_filter":    a.LevelFilter,
 		"title_pattern":   a.TitlePattern,

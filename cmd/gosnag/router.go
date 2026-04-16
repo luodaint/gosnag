@@ -16,21 +16,21 @@ import (
 	activitypkg "github.com/darkspock/gosnag/internal/activity"
 	aipkg "github.com/darkspock/gosnag/internal/ai"
 	"github.com/darkspock/gosnag/internal/alert"
-	"github.com/darkspock/gosnag/internal/comment"
 	"github.com/darkspock/gosnag/internal/auth"
+	"github.com/darkspock/gosnag/internal/comment"
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
+	"github.com/darkspock/gosnag/internal/github"
 	"github.com/darkspock/gosnag/internal/ingest"
 	"github.com/darkspock/gosnag/internal/issue"
-	"github.com/darkspock/gosnag/internal/github"
 	"github.com/darkspock/gosnag/internal/jira"
 	"github.com/darkspock/gosnag/internal/n1"
-	"github.com/darkspock/gosnag/internal/sourcecode"
-	"github.com/darkspock/gosnag/internal/ticket"
-	"github.com/darkspock/gosnag/internal/upload"
 	"github.com/darkspock/gosnag/internal/priority"
 	"github.com/darkspock/gosnag/internal/project"
+	"github.com/darkspock/gosnag/internal/sourcecode"
 	"github.com/darkspock/gosnag/internal/tags"
+	"github.com/darkspock/gosnag/internal/ticket"
+	"github.com/darkspock/gosnag/internal/upload"
 	"github.com/darkspock/gosnag/internal/user"
 	"github.com/darkspock/gosnag/web"
 	"github.com/go-chi/chi/v5"
@@ -257,6 +257,7 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				// Alerts per project
 				r.Route("/alerts", func(r chi.Router) {
 					r.Get("/", alertHandler.List)
+					r.With(auth.RequireAdmin).Get("/{alert_id}", alertHandler.Get)
 					r.With(auth.RequireAdmin).Post("/", alertHandler.Create)
 					r.With(auth.RequireAdmin).Put("/{alert_id}", alertHandler.Update)
 					r.With(auth.RequireAdmin).Delete("/{alert_id}", alertHandler.Delete)

@@ -398,21 +398,27 @@ export default function ProjectSettings() {
     setShowAlertForm(true)
   }
 
-  const openEditAlert = (a: AlertConfig) => {
-    setEditingAlert(a)
-    setAlertType(a.alert_type)
-    setAlertConfig(
-      a.alert_type === 'email'
-        ? (a.config as { recipients?: string[] }).recipients?.join(', ') || ''
-        : (a.config as { webhook_url?: string }).webhook_url || ''  // will be empty when redacted
-    )
-    // If conditions JSONB exists, use it; otherwise auto-convert legacy fields
-    if (a.conditions) {
-      setAlertConditions(a.conditions as unknown as ConditionGroup)
-    } else {
-      setAlertConditions(legacyToConditions(a))
+  const openEditAlert = async (a: AlertConfig) => {
+    if (!projectId) return
+    try {
+      const fullAlert = await api.getAlert(projectId, a.id)
+      setEditingAlert(fullAlert)
+      setAlertType(fullAlert.alert_type)
+      setAlertConfig(
+        fullAlert.alert_type === 'email'
+          ? (fullAlert.config as { recipients?: string[] }).recipients?.join(', ') || ''
+          : (fullAlert.config as { webhook_url?: string }).webhook_url || ''
+      )
+      // If conditions JSONB exists, use it; otherwise auto-convert legacy fields
+      if (fullAlert.conditions) {
+        setAlertConditions(fullAlert.conditions as unknown as ConditionGroup)
+      } else {
+        setAlertConditions(legacyToConditions(fullAlert))
+      }
+      setShowAlertForm(true)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load alert')
     }
-    setShowAlertForm(true)
   }
 
   const handleSaveAlert = async () => {
