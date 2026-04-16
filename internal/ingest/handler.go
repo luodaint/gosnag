@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"database/sql"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -151,15 +152,37 @@ func (h *Handler) authenticate(r *http.Request) (uuid.UUID, db.ProjectKey, error
 	return uuid.Nil, db.ProjectKey{}, errUnauthorized
 }
 
-func (h *Handler) processEvent(r *http.Request, project db.Project, event *SentryEvent) {
-	// Drop info/debug events — they create too many issues and provide little value
-	if event.Level == "info" || event.Level == "debug" {
-		return
+func isInformationalLevel(level string) bool {
+	return level == "info" || level == "debug"
+}
+
+func resolveIssueGrouping(project db.Project, event *SentryEvent) (string, string, string) {
+	fingerprint := event.ComputeFingerprint()
+	title := event.IssueTitle()
+	culprit := event.Culprit()
+
+	if !isInformationalLevel(event.Level) {
+		return fingerprint, title, culprit
 	}
 
+	switch project.InfoGroupingMode {
+	case "by_url":
+		if hint, ok := event.URLGroupingHint(); ok {
+			return hashFingerprintKey(hint.FingerprintKey), hint.Title, hint.Culprit
+		}
+	case "by_file":
+		if hint, ok := event.FileGroupingHint(); ok {
+			return hashFingerprintKey(hint.FingerprintKey), hint.Title, hint.Culprit
+		}
+	}
+
+	return fingerprint, title, culprit
+}
+
+func (h *Handler) processEvent(r *http.Request, project db.Project, event *SentryEvent) {
 	ctx := r.Context()
 	projectID := project.ID
-	fingerprint := event.ComputeFingerprint()
+	fingerprint, issueTitle, culprit := resolveIssueGrouping(project, event)
 	now := time.Now()
 	issueLevel := normalizeIssueLevel(event.Level, project.WarningAsError)
 
@@ -175,15 +198,39 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 		}
 	}
 
+	if isInformationalLevel(event.Level) && project.MaxInfoIssues > 0 {
+		_, err := h.queries.GetIssueByFingerprint(ctx, db.GetIssueByFingerprintParams{
+			ProjectID:   projectID,
+			Fingerprint: fingerprint,
+		})
+		if err == sql.ErrNoRows {
+			reachedLimit, limitErr := h.queries.HasReachedInfoIssueLimit(ctx, db.HasReachedInfoIssueLimitParams{
+				ProjectID:     projectID,
+				MaxInfoIssues: project.MaxInfoIssues,
+			})
+			if limitErr != nil {
+				slog.Error("failed to check informational issue limit", "error", limitErr, "project_id", projectID)
+				return
+			}
+			if reachedLimit {
+				slog.Warn("dropping new informational issue because max_info_issues limit was reached", "project_id", projectID, "fingerprint", fingerprint, "limit", project.MaxInfoIssues)
+				return
+			}
+		} else if err != nil {
+			slog.Error("failed to check existing issue by fingerprint", "error", err, "project_id", projectID)
+			return
+		}
+	}
+
 	// Upsert issue (create or update event count)
 	issue, err := h.queries.UpsertIssue(ctx, db.UpsertIssueParams{
 		ProjectID:    projectID,
-		Title:        event.IssueTitle(),
+		Title:        issueTitle,
 		Fingerprint:  fingerprint,
 		Level:        issueLevel,
 		Platform:     event.Platform,
 		FirstSeen:    now,
-		Culprit:      event.Culprit(),
+		Culprit:      culprit,
 		FirstRelease: event.Release,
 	})
 	if err != nil {

@@ -334,6 +334,13 @@ export interface ProjectGroup {
   created_at: string
 }
 
+export interface StacktraceRules {
+  preset: string
+  app_patterns: string[]
+  framework_patterns: string[]
+  external_patterns: string[]
+}
+
 export interface Project {
   id: string
   numeric_id: number
@@ -342,9 +349,11 @@ export interface Project {
   default_cooldown_minutes: number
   warning_as_error: boolean
   max_events_per_issue: number
+  max_info_issues: number
   icon: string
   color: string
   position: number
+  info_grouping_mode: string
   jira_base_url: string
   jira_email: string
   jira_api_token_set: boolean
@@ -372,6 +381,7 @@ export interface Project {
   ai_ticket_description: boolean
   ai_root_cause: boolean
   ai_triage: boolean
+  stacktrace_rules: StacktraceRules
   created_at: string
   total_issues?: number
   open_issues?: number

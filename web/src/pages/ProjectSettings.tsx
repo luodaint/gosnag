@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type TagSuggestion, type AIUsage, type RuleSuggestion } from '@/lib/api'
+import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type TagSuggestion, type AIUsage, type RuleSuggestion, type StacktraceRules } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,6 +14,7 @@ import { Bell, Brain, Check, Copy, Gauge, Key, Loader2, Pencil, Plus, Send, Sett
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
 import { ConditionBuilder, type ConditionGroup, type ConditionNode } from '@/components/ui/condition-builder'
+import { buildStacktraceRulesPreset, normalizeStacktraceRules, STACKTRACE_RULE_PRESETS } from '@/lib/stacktrace-rules'
 
 function legacyToConditions(a: { level_filter?: string; title_pattern?: string; exclude_pattern?: string; min_events?: number; min_velocity_1h?: number }): ConditionGroup {
   const conds: ConditionNode[] = []
@@ -151,7 +152,9 @@ export default function ProjectSettings() {
   const [defaultCooldown, setDefaultCooldown] = useState('60')
   const [warningAsError, setWarningAsError] = useState(false)
   const [maxEventsPerIssue, setMaxEventsPerIssue] = useState('1000')
+  const [maxInfoIssues, setMaxInfoIssues] = useState('0')
   const [issueDisplayMode, setIssueDisplayMode] = useState('classic')
+  const [infoGroupingMode, setInfoGroupingMode] = useState('normal')
   const [workflowMode, setWorkflowMode] = useState('simple')
   const [repoProvider, setRepoProvider] = useState('')
   const [repoOwner, setRepoOwner] = useState('')
@@ -159,6 +162,8 @@ export default function ProjectSettings() {
   const [repoDefaultBranch, setRepoDefaultBranch] = useState('main')
   const [repoToken, setRepoToken] = useState('')
   const [repoPathStrip, setRepoPathStrip] = useState('')
+  const [stacktracePreset, setStacktracePreset] = useState('generic')
+  const [stacktraceRules, setStacktraceRules] = useState<StacktraceRules>(buildStacktraceRulesPreset('generic'))
   const [repoTesting, setRepoTesting] = useState(false)
   const [savingRepo, setSavingRepo] = useState(false)
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
@@ -196,6 +201,8 @@ export default function ProjectSettings() {
     setDefaultCooldown(String(p.default_cooldown_minutes ?? 60))
     setWarningAsError(p.warning_as_error)
     setMaxEventsPerIssue(String(p.max_events_per_issue ?? 1000))
+    setMaxInfoIssues(String(p.max_info_issues ?? 0))
+    setInfoGroupingMode(p.info_grouping_mode || 'normal')
     setJiraBaseUrl(p.jira_base_url || '')
     setJiraEmail(p.jira_email || '')
     setJiraApiToken('')
@@ -213,6 +220,9 @@ export default function ProjectSettings() {
     setRepoDefaultBranch(p.repo_default_branch || 'main')
     setRepoToken('')
     setRepoPathStrip(p.repo_path_strip || '')
+    const nextStacktraceRules = normalizeStacktraceRules(p.stacktrace_rules)
+    setStacktraceRules(nextStacktraceRules)
+    setStacktracePreset(nextStacktraceRules.preset || 'generic')
     setSelectedGroupId(p.group_id || '')
     setAiEnabled(p.ai_enabled)
     setAiModel(p.ai_model || '')
@@ -234,7 +244,9 @@ export default function ProjectSettings() {
     default_cooldown_minutes: parseInt(defaultCooldown) || 0,
     warning_as_error: warningAsError,
     max_events_per_issue: parseInt(maxEventsPerIssue) || 0,
+    max_info_issues: parseInt(maxInfoIssues) || 0,
     issue_display_mode: issueDisplayMode,
+    info_grouping_mode: infoGroupingMode,
     workflow_mode: workflowMode,
     repo_provider: repoProvider,
     repo_owner: repoOwner,
@@ -242,6 +254,7 @@ export default function ProjectSettings() {
     repo_default_branch: repoDefaultBranch,
     repo_token: repoToken,
     repo_path_strip: repoPathStrip,
+    stacktrace_rules: stacktraceRules,
     jira_base_url: jiraBaseUrl,
     jira_email: jiraEmail,
     jira_api_token: jiraApiToken,
@@ -259,6 +272,22 @@ export default function ProjectSettings() {
     ai_ticket_description: aiTicketDescription,
     ai_root_cause: aiRootCause,
   })
+
+  const updateStacktracePatternGroup = (key: 'app_patterns' | 'framework_patterns' | 'external_patterns', value: string) => {
+    setStacktraceRules(prev => ({
+      ...prev,
+      [key]: value
+        .split('\n')
+        .map(pattern => pattern.trim())
+        .filter(Boolean),
+    }))
+  }
+
+  const loadStacktracePreset = () => {
+    const preset = buildStacktraceRulesPreset(stacktracePreset)
+    setStacktraceRules(preset)
+    toast.success(`${STACKTRACE_RULE_PRESETS.find(item => item.id === stacktracePreset)?.label || 'Preset'} rules loaded`)
+  }
 
   useEffect(() => {
     if (!projectId) return
@@ -1210,26 +1239,55 @@ export default function ProjectSettings() {
                       </p>
                     </div>
 
-                    <div>
-                      <label className="text-sm font-medium">Issue List Display</label>
-                      <Select value={issueDisplayMode} onChange={e => setIssueDisplayMode(e.target.value)} className="mt-1 max-w-xs">
-                        <option value="classic">Classic (badges + full title)</option>
-                        <option value="detailed">Detailed (exception + endpoint + message)</option>
-                      </Select>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Default display mode for the issue list. Users can toggle per-session.
-                      </p>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label className="text-sm font-medium">Info / Debug Grouping</label>
+                        <Select value={infoGroupingMode} onChange={e => setInfoGroupingMode(e.target.value)} className="mt-1 max-w-xs">
+                          <option value="normal">Normal</option>
+                          <option value="by_url">By URL</option>
+                          <option value="by_file">By file</option>
+                        </Select>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Controls how new `info` and `debug` issues are fingerprinted. Changing it affects new incoming events; existing issues keep their current fingerprint unless you merge or rebuild them.
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Max Info / Debug Issues</label>
+                        <Input
+                          type="number"
+                          value={maxInfoIssues}
+                          onChange={e => setMaxInfoIssues(e.target.value)}
+                          min="0"
+                          className="mt-1 max-w-xs"
+                        />
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Maximum number of distinct `info/debug` issues allowed. When reached, new informational issues are dropped, but existing ones still receive events.
+                        </p>
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="text-sm font-medium">Workflow Mode</label>
-                      <Select value={workflowMode} onChange={e => setWorkflowMode(e.target.value)} className="mt-1 max-w-xs">
-                        <option value="simple">Simple (monitoring only)</option>
-                        <option value="managed">Managed (tickets + board)</option>
-                      </Select>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Simple: issues have basic statuses. Managed: enables tickets with workflow, assignment, board view, and escalation.
-                      </p>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label className="text-sm font-medium">Issue List Display</label>
+                        <Select value={issueDisplayMode} onChange={e => setIssueDisplayMode(e.target.value)} className="mt-1 max-w-xs">
+                          <option value="classic">Classic (badges + full title)</option>
+                          <option value="detailed">Detailed (exception + endpoint + message)</option>
+                        </Select>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Default display mode for the issue list. Users can toggle per-session.
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium">Workflow Mode</label>
+                        <Select value={workflowMode} onChange={e => setWorkflowMode(e.target.value)} className="mt-1 max-w-xs">
+                          <option value="simple">Simple (monitoring only)</option>
+                          <option value="managed">Managed (tickets + board)</option>
+                        </Select>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Simple: issues have basic statuses. Managed: enables tickets with workflow, assignment, board view, and escalation.
+                        </p>
+                      </div>
                     </div>
 
                     {allGroups.length > 0 && (
@@ -2320,6 +2378,77 @@ export default function ProjectSettings() {
                         {savingRepo ? 'Saving...' : 'Save Repository Settings'}
                       </Button>
                     </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Stack Trace Rules</CardTitle>
+                  <CardDescription>
+                    Load a framework preset, then edit the regex lists to decide what counts as app, framework, or external code for this project.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                    <div>
+                      <label className="text-sm font-medium">Framework Preset</label>
+                      <Select value={stacktracePreset} onChange={e => setStacktracePreset(e.target.value)} className="mt-1">
+                        {STACKTRACE_RULE_PRESETS.map(preset => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {STACKTRACE_RULE_PRESETS.find(item => item.id === stacktracePreset)?.description}
+                      </p>
+                    </div>
+                    <Button type="button" variant="outline" onClick={loadStacktracePreset}>
+                      Load Rules
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-3">
+                    <div>
+                      <label className="text-sm font-medium">App Patterns</label>
+                      <textarea
+                        value={stacktraceRules.app_patterns.join('\n')}
+                        onChange={e => updateStacktracePatternGroup('app_patterns', e.target.value)}
+                        placeholder="(^|/)application/"
+                        rows={7}
+                        className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">One regex per line. These frames are shown first.</p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium">Framework Patterns</label>
+                      <textarea
+                        value={stacktraceRules.framework_patterns.join('\n')}
+                        onChange={e => updateStacktracePatternGroup('framework_patterns', e.target.value)}
+                        placeholder="(^|/)system/"
+                        rows={7}
+                        className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">Use this for framework core or any directories you still want visible but separated.</p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium">External Patterns</label>
+                      <textarea
+                        value={stacktraceRules.external_patterns.join('\n')}
+                        onChange={e => updateStacktracePatternGroup('external_patterns', e.target.value)}
+                        placeholder="(^|/)vendor/"
+                        rows={7}
+                        className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">Libraries and dependencies you usually want collapsed or toned down.</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+                    You can load a preset and then tweak it. That covers teams who patch framework internals or want certain framework paths highlighted instead of hidden.
                   </div>
                 </CardContent>
               </Card>

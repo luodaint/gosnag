@@ -16,6 +16,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { IssueDetailSkeleton } from '@/components/ui/skeleton'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
 import { useKeyboardShortcut } from '@/lib/use-keyboard'
+import { classifyStackFrame } from '@/lib/stacktrace-rules'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -1130,31 +1131,85 @@ function buildSourceURL(filename: string, lineno: number, project: Project | nul
   return null
 }
 
-function ExceptionSection({ exception, project }: { exception: { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<{ filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }> } }> }; project: Project | null }) {
+type StacktraceFrame = { filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }
+type ClassifiedStacktraceFrame = StacktraceFrame & { kind: 'app' | 'framework' | 'external' }
+
+function pickRelevantFrames(frames: ClassifiedStacktraceFrame[]): ClassifiedStacktraceFrame[] {
+  const appFrames = frames.filter(frame => frame.kind === 'app')
+  if (appFrames.length > 0) return appFrames.slice(0, 3)
+
+  const frameworkFrames = frames.filter(frame => frame.kind === 'framework')
+  if (frameworkFrames.length > 0) return frameworkFrames.slice(0, 3)
+
+  return frames.slice(0, 3)
+}
+
+function ExceptionSection({ exception, project }: { exception: { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<StacktraceFrame> } }> }; project: Project | null }) {
   if (!exception?.values) return null
   return (
     <div className="space-y-4">
       <SectionHeader title="Exception" />
       {exception.values.map((exc, i) => (
-        <div key={i} className="rounded-lg border border-border/60 overflow-hidden">
-          <div className="px-4 py-3 bg-red-500/5 border-b border-red-500/10">
-            <span className="font-mono text-sm font-bold text-red-400">{exc.type}</span>
-            <span className="font-mono text-sm text-red-300/70">: {exc.value}</span>
+        <ExceptionCard key={i} exception={exc} project={project} />
+      ))}
+    </div>
+  )
+}
+
+function ExceptionCard({ exception, project }: { exception: { type: string; value: string; stacktrace?: { frames?: Array<StacktraceFrame> } }; project: Project | null }) {
+  const [showAllFrames, setShowAllFrames] = useState(false)
+  const classifiedFrames = (exception.stacktrace?.frames || []).slice().reverse().map(frame => ({
+    ...frame,
+    kind: classifyStackFrame(frame.filename, project?.stacktrace_rules, frame.in_app),
+  }))
+  const visibleFrames = showAllFrames ? classifiedFrames : pickRelevantFrames(classifiedFrames)
+  const hiddenFrames = Math.max(classifiedFrames.length - visibleFrames.length, 0)
+  const counts = {
+    app: classifiedFrames.filter(frame => frame.kind === 'app').length,
+    framework: classifiedFrames.filter(frame => frame.kind === 'framework').length,
+    external: classifiedFrames.filter(frame => frame.kind === 'external').length,
+  }
+
+  return (
+    <div className="rounded-lg border border-border/60 overflow-hidden">
+      <div className="px-4 py-3 bg-red-500/5 border-b border-red-500/10">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-sm font-bold text-red-400">{exception.type}</span>
+          <span className="font-mono text-sm text-red-300/70 break-all">: {exception.value}</span>
+        </div>
+      </div>
+      {classifiedFrames.length > 0 && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/40 bg-background/40 px-4 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">App {counts.app}</Badge>
+              <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-300">Framework {counts.framework}</Badge>
+              <Badge variant="outline" className="border-slate-500/30 bg-slate-500/10 text-slate-300">External {counts.external}</Badge>
+              {!showAllFrames && hiddenFrames > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Showing the most relevant frames first
+                </span>
+              )}
+            </div>
+            {hiddenFrames > 0 && (
+              <Button variant="ghost" size="sm" onClick={() => setShowAllFrames(v => !v)}>
+                {showAllFrames ? 'Show relevant only' : `Show full stacktrace (${hiddenFrames} hidden)`}
+              </Button>
+            )}
           </div>
-          {exc.stacktrace?.frames && (
-            <div className="bg-[#0d1117] overflow-x-auto">
-              <table className="w-full text-xs font-mono">
-                <tbody>
-                  {[...exc.stacktrace.frames].reverse().map((frame, j) => {
-                    const sourceUrl = buildSourceURL(frame.filename, frame.lineno, project)
-                    return (
+          <div className="bg-[#0d1117] overflow-x-auto">
+            <table className="w-full text-xs font-mono">
+              <tbody>
+                {visibleFrames.map((frame, j) => {
+                  const sourceUrl = buildSourceURL(frame.filename, frame.lineno, project)
+                  return (
                     <tr
-                      key={j}
+                      key={`${frame.filename}:${frame.lineno}:${j}`}
                       className={cn(
                         'border-l-2 transition-colors hover:bg-white/[0.02]',
-                        frame.in_app
-                          ? 'border-l-primary bg-primary/[0.03] text-foreground'
-                          : 'border-l-transparent text-muted-foreground'
+                        frame.kind === 'app' && 'border-l-primary bg-primary/[0.05] text-foreground',
+                        frame.kind === 'framework' && 'border-l-amber-500/70 bg-amber-500/[0.04] text-foreground/85',
+                        frame.kind === 'external' && 'border-l-transparent text-muted-foreground'
                       )}
                     >
                       <td className="px-3 py-1.5 text-right text-muted-foreground/40 select-none w-12 shrink-0">
@@ -1163,13 +1218,23 @@ function ExceptionSection({ exception, project }: { exception: { values?: Array<
                       <td className="px-3 py-1.5">
                         {sourceUrl ? (
                           <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                            <span className="text-primary/70">{frame.filename}</span>
+                            <span className={cn(
+                              frame.kind === 'app' && 'text-primary/80',
+                              frame.kind === 'framework' && 'text-amber-200/80',
+                              frame.kind === 'external' && 'text-muted-foreground'
+                            )}>
+                              {frame.filename}
+                            </span>
                           </a>
                         ) : (
-                          <span className="text-muted-foreground">{frame.filename}</span>
+                          <span className={frame.kind === 'external' ? 'text-muted-foreground' : 'text-foreground/80'}>{frame.filename}</span>
                         )}
                         <span className="text-muted-foreground/40"> in </span>
-                        <span className={frame.in_app ? 'text-primary font-semibold' : 'text-foreground/60'}>
+                        <span className={cn(
+                          frame.kind === 'app' && 'text-primary font-semibold',
+                          frame.kind === 'framework' && 'text-amber-200 font-medium',
+                          frame.kind === 'external' && 'text-foreground/60'
+                        )}>
                           {frame.function}
                         </span>
                         {sourceUrl && (
@@ -1179,14 +1244,13 @@ function ExceptionSection({ exception, project }: { exception: { values?: Array<
                         )}
                       </td>
                     </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      ))}
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   )
 }

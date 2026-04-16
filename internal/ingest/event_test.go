@@ -98,46 +98,64 @@ func TestFingerprintMessageFallback(t *testing.T) {
 	}
 }
 
-func TestFingerprintExcessiveQueriesGroupsByRoute(t *testing.T) {
+func TestURLGroupingHintUsesRequestURL(t *testing.T) {
 	eventA := &SentryEvent{
-		Message: "Error: [ExcessiveQueries] 128 queries (126.5ms total) — /api2/GoogleMaps/v3/CreateBooking\n" +
-			"Server: CoverPHP83-API\n" +
-			"URL: POST http://www.covermanager.com/api2/GoogleMaps/v3/CreateBooking\n" +
-			`Body: {"slot":{"resources":{"party_size":4}},"user_information":{"email":"rosasafont@hotmail.com"},"idempotency_token":"14859062036507846112"}`,
+		Request: map[string]any{
+			"method": "post",
+			"url":    "https://www.covermanager.com/api2/GoogleMaps/v3/CreateBooking?foo=bar",
+		},
 	}
 
-	eventB := &SentryEvent{
-		Message: "Error: [ExcessiveQueries] 185 queries (661.71ms total) — /api2/GoogleMaps/v3/CreateBooking\n" +
-			"Server: CoverPHP83-API\n" +
-			"URL: POST http://www.covermanager.com/api2/GoogleMaps/v3/CreateBooking\n" +
-			`Body: {"slot":{"resources":{"party_size":2}},"user_information":{"email":"jose.taracena@hotmail.com"},"idempotency_token":"12452082239147641745"}`,
+	hint, ok := eventA.URLGroupingHint()
+	if !ok {
+		t.Fatal("expected URL grouping hint")
 	}
 
-	if eventA.ComputeFingerprint() != eventB.ComputeFingerprint() {
-		t.Fatal("same ExcessiveQueries endpoint should produce the same fingerprint")
-	}
-
-	if got, want := eventA.IssueTitle(), "[ExcessiveQueries] POST /api2/GoogleMaps/v3/CreateBooking"; got != want {
-		t.Fatalf("unexpected issue title: got %q want %q", got, want)
-	}
-
-	if got, want := eventA.Culprit(), "POST /api2/GoogleMaps/v3/CreateBooking"; got != want {
+	if got, want := hint.Culprit, "POST /api2/GoogleMaps/v3/CreateBooking"; got != want {
 		t.Fatalf("unexpected culprit: got %q want %q", got, want)
+	}
+
+	if got, want := hint.Title, "POST /api2/GoogleMaps/v3/CreateBooking"; got != want {
+		t.Fatalf("unexpected title: got %q want %q", got, want)
 	}
 }
 
-func TestFingerprintExcessiveQueriesSeparatesRoutes(t *testing.T) {
-	eventA := &SentryEvent{
-		Message: "Error: [ExcessiveQueries] 128 queries (126.5ms total) — /api2/GoogleMaps/v3/CreateBooking\n" +
-			"URL: POST http://www.covermanager.com/api2/GoogleMaps/v3/CreateBooking",
+func TestURLGroupingHintFallsBackToMessageURL(t *testing.T) {
+	event := &SentryEvent{
+		Message: "Error: [SlowRequest]\nURL: POST http://www.covermanager.com/api2/GoogleMaps/v3/CreateBooking\nBody: {\"merchant_id\":\"5453\"}",
 	}
 
-	eventB := &SentryEvent{
-		Message: "Error: [ExcessiveQueries] 130 queries (140ms total) — /api2/GoogleMaps/v3/CancelBooking\n" +
-			"URL: POST http://www.covermanager.com/api2/GoogleMaps/v3/CancelBooking",
+	hint, ok := event.URLGroupingHint()
+	if !ok {
+		t.Fatal("expected URL grouping hint from message")
 	}
 
-	if eventA.ComputeFingerprint() == eventB.ComputeFingerprint() {
-		t.Fatal("different ExcessiveQueries endpoints should produce different fingerprints")
+	if got, want := hint.FingerprintKey, "info:url|POST|/api2/GoogleMaps/v3/CreateBooking"; got != want {
+		t.Fatalf("unexpected fingerprint key: got %q want %q", got, want)
+	}
+}
+
+func TestFileGroupingHintUsesInAppFrame(t *testing.T) {
+	event := &SentryEvent{
+		Exception: &ExceptionData{Values: []ExceptionValue{{
+			Type: "RuntimeException",
+			Stacktrace: &Stacktrace{Frames: []Frame{
+				{Filename: "/vendor/framework/Core.php", Function: "run", InApp: boolPtr(false)},
+				{Filename: "/application/controllers/Booking.php", Function: "create", InApp: boolPtr(true)},
+			}},
+		}}},
+	}
+
+	hint, ok := event.FileGroupingHint()
+	if !ok {
+		t.Fatal("expected file grouping hint")
+	}
+
+	if got, want := hint.Culprit, "/application/controllers/Booking.php"; got != want {
+		t.Fatalf("unexpected culprit: got %q want %q", got, want)
+	}
+
+	if got, want := hint.Title, "RuntimeException: Booking.php"; got != want {
+		t.Fatalf("unexpected title: got %q want %q", got, want)
 	}
 }

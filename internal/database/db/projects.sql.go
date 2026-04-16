@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +16,7 @@ import (
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (name, slug, default_cooldown_minutes)
 VALUES ($1, $2, $3)
-RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage
+RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage, stacktrace_rules, info_grouping_mode, max_info_issues
 `
 
 type CreateProjectParams struct {
@@ -66,6 +67,9 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.AiTicketDescription,
 		&i.AiRootCause,
 		&i.AiTriage,
+		&i.StacktraceRules,
+		&i.InfoGroupingMode,
+		&i.MaxInfoIssues,
 	)
 	return i, err
 }
@@ -112,7 +116,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id uuid.UUID) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage FROM projects WHERE id = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage, stacktrace_rules, info_grouping_mode, max_info_issues FROM projects WHERE id = $1
 `
 
 func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error) {
@@ -157,12 +161,15 @@ func (q *Queries) GetProject(ctx context.Context, id uuid.UUID) (Project, error)
 		&i.AiTicketDescription,
 		&i.AiRootCause,
 		&i.AiTriage,
+		&i.StacktraceRules,
+		&i.InfoGroupingMode,
+		&i.MaxInfoIssues,
 	)
 	return i, err
 }
 
 const getProjectByNumericID = `-- name: GetProjectByNumericID :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage FROM projects WHERE numeric_id = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage, stacktrace_rules, info_grouping_mode, max_info_issues FROM projects WHERE numeric_id = $1
 `
 
 func (q *Queries) GetProjectByNumericID(ctx context.Context, numericID int32) (Project, error) {
@@ -207,12 +214,15 @@ func (q *Queries) GetProjectByNumericID(ctx context.Context, numericID int32) (P
 		&i.AiTicketDescription,
 		&i.AiRootCause,
 		&i.AiTriage,
+		&i.StacktraceRules,
+		&i.InfoGroupingMode,
+		&i.MaxInfoIssues,
 	)
 	return i, err
 }
 
 const getProjectBySlug = `-- name: GetProjectBySlug :one
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage FROM projects WHERE slug = $1
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage, stacktrace_rules, info_grouping_mode, max_info_issues FROM projects WHERE slug = $1
 `
 
 func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, error) {
@@ -257,6 +267,9 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, e
 		&i.AiTicketDescription,
 		&i.AiRootCause,
 		&i.AiTriage,
+		&i.StacktraceRules,
+		&i.InfoGroupingMode,
+		&i.MaxInfoIssues,
 	)
 	return i, err
 }
@@ -440,7 +453,7 @@ func (q *Queries) GetProjectWeeklyErrors(ctx context.Context) ([]GetProjectWeekl
 }
 
 const listAIEnabledProjects = `-- name: ListAIEnabledProjects :many
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage FROM projects WHERE ai_enabled = true AND ai_merge_suggestions = true
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage, stacktrace_rules, info_grouping_mode, max_info_issues FROM projects WHERE ai_enabled = true AND ai_merge_suggestions = true
 `
 
 func (q *Queries) ListAIEnabledProjects(ctx context.Context) ([]Project, error) {
@@ -491,6 +504,9 @@ func (q *Queries) ListAIEnabledProjects(ctx context.Context) ([]Project, error) 
 			&i.AiTicketDescription,
 			&i.AiRootCause,
 			&i.AiTriage,
+			&i.StacktraceRules,
+			&i.InfoGroupingMode,
+			&i.MaxInfoIssues,
 		); err != nil {
 			return nil, err
 		}
@@ -540,7 +556,7 @@ func (q *Queries) ListProjectKeys(ctx context.Context, projectID uuid.UUID) ([]P
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage FROM projects ORDER BY position, created_at DESC
+SELECT id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage, stacktrace_rules, info_grouping_mode, max_info_issues FROM projects ORDER BY position, created_at DESC
 `
 
 func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
@@ -591,6 +607,9 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.AiTicketDescription,
 			&i.AiRootCause,
 			&i.AiTriage,
+			&i.StacktraceRules,
+			&i.InfoGroupingMode,
+			&i.MaxInfoIssues,
 		); err != nil {
 			return nil, err
 		}
@@ -612,51 +631,57 @@ SET name = $2, slug = $3, default_cooldown_minutes = $4, warning_as_error = $5,
     max_events_per_issue = $11,
     icon = $12, color = $13,
     issue_display_mode = $14,
-    github_token = $15, github_owner = $16, github_repo = $17, github_labels = $18,
-    workflow_mode = $19,
-    repo_provider = $20, repo_owner = $21, repo_name = $22,
-    repo_default_branch = $23, repo_token = $24, repo_path_strip = $25,
-    ai_enabled = $26, ai_model = $27, ai_merge_suggestions = $28, ai_auto_merge = $29,
-    ai_anomaly_detection = $30, ai_ticket_description = $31, ai_root_cause = $32, ai_triage = $33,
+    info_grouping_mode = $15,
+    max_info_issues = $16,
+    github_token = $17, github_owner = $18, github_repo = $19, github_labels = $20,
+    workflow_mode = $21,
+    repo_provider = $22, repo_owner = $23, repo_name = $24,
+    repo_default_branch = $25, repo_token = $26, repo_path_strip = $27,
+    ai_enabled = $28, ai_model = $29, ai_merge_suggestions = $30, ai_auto_merge = $31,
+    ai_anomaly_detection = $32, ai_ticket_description = $33, ai_root_cause = $34, ai_triage = $35,
+    stacktrace_rules = $36,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage
+RETURNING id, name, slug, default_cooldown_minutes, created_at, updated_at, warning_as_error, jira_base_url, jira_email, jira_api_token, jira_project_key, jira_issue_type, group_id, max_events_per_issue, icon, color, position, numeric_id, issue_display_mode, github_token, github_owner, github_repo, github_labels, workflow_mode, repo_provider, repo_owner, repo_name, repo_default_branch, repo_token, repo_path_strip, ai_enabled, ai_model, ai_merge_suggestions, ai_auto_merge, ai_anomaly_detection, ai_ticket_description, ai_root_cause, ai_triage, stacktrace_rules, info_grouping_mode, max_info_issues
 `
 
 type UpdateProjectParams struct {
-	ID                     uuid.UUID `json:"id"`
-	Name                   string    `json:"name"`
-	Slug                   string    `json:"slug"`
-	DefaultCooldownMinutes int32     `json:"default_cooldown_minutes"`
-	WarningAsError         bool      `json:"warning_as_error"`
-	JiraBaseUrl            string    `json:"jira_base_url"`
-	JiraEmail              string    `json:"jira_email"`
-	JiraApiToken           string    `json:"jira_api_token"`
-	JiraProjectKey         string    `json:"jira_project_key"`
-	JiraIssueType          string    `json:"jira_issue_type"`
-	MaxEventsPerIssue      int32     `json:"max_events_per_issue"`
-	Icon                   string    `json:"icon"`
-	Color                  string    `json:"color"`
-	IssueDisplayMode       string    `json:"issue_display_mode"`
-	GithubToken            string    `json:"github_token"`
-	GithubOwner            string    `json:"github_owner"`
-	GithubRepo             string    `json:"github_repo"`
-	GithubLabels           string    `json:"github_labels"`
-	WorkflowMode           string    `json:"workflow_mode"`
-	RepoProvider           string    `json:"repo_provider"`
-	RepoOwner              string    `json:"repo_owner"`
-	RepoName               string    `json:"repo_name"`
-	RepoDefaultBranch      string    `json:"repo_default_branch"`
-	RepoToken              string    `json:"repo_token"`
-	RepoPathStrip          string    `json:"repo_path_strip"`
-	AiEnabled              bool      `json:"ai_enabled"`
-	AiModel                string    `json:"ai_model"`
-	AiMergeSuggestions     bool      `json:"ai_merge_suggestions"`
-	AiAutoMerge            bool      `json:"ai_auto_merge"`
-	AiAnomalyDetection     bool      `json:"ai_anomaly_detection"`
-	AiTicketDescription    bool      `json:"ai_ticket_description"`
-	AiRootCause            bool      `json:"ai_root_cause"`
-	AiTriage               bool      `json:"ai_triage"`
+	ID                     uuid.UUID       `json:"id"`
+	Name                   string          `json:"name"`
+	Slug                   string          `json:"slug"`
+	DefaultCooldownMinutes int32           `json:"default_cooldown_minutes"`
+	WarningAsError         bool            `json:"warning_as_error"`
+	JiraBaseUrl            string          `json:"jira_base_url"`
+	JiraEmail              string          `json:"jira_email"`
+	JiraApiToken           string          `json:"jira_api_token"`
+	JiraProjectKey         string          `json:"jira_project_key"`
+	JiraIssueType          string          `json:"jira_issue_type"`
+	MaxEventsPerIssue      int32           `json:"max_events_per_issue"`
+	Icon                   string          `json:"icon"`
+	Color                  string          `json:"color"`
+	IssueDisplayMode       string          `json:"issue_display_mode"`
+	InfoGroupingMode       string          `json:"info_grouping_mode"`
+	MaxInfoIssues          int32           `json:"max_info_issues"`
+	GithubToken            string          `json:"github_token"`
+	GithubOwner            string          `json:"github_owner"`
+	GithubRepo             string          `json:"github_repo"`
+	GithubLabels           string          `json:"github_labels"`
+	WorkflowMode           string          `json:"workflow_mode"`
+	RepoProvider           string          `json:"repo_provider"`
+	RepoOwner              string          `json:"repo_owner"`
+	RepoName               string          `json:"repo_name"`
+	RepoDefaultBranch      string          `json:"repo_default_branch"`
+	RepoToken              string          `json:"repo_token"`
+	RepoPathStrip          string          `json:"repo_path_strip"`
+	AiEnabled              bool            `json:"ai_enabled"`
+	AiModel                string          `json:"ai_model"`
+	AiMergeSuggestions     bool            `json:"ai_merge_suggestions"`
+	AiAutoMerge            bool            `json:"ai_auto_merge"`
+	AiAnomalyDetection     bool            `json:"ai_anomaly_detection"`
+	AiTicketDescription    bool            `json:"ai_ticket_description"`
+	AiRootCause            bool            `json:"ai_root_cause"`
+	AiTriage               bool            `json:"ai_triage"`
+	StacktraceRules        json.RawMessage `json:"stacktrace_rules"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
@@ -675,6 +700,8 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.Icon,
 		arg.Color,
 		arg.IssueDisplayMode,
+		arg.InfoGroupingMode,
+		arg.MaxInfoIssues,
 		arg.GithubToken,
 		arg.GithubOwner,
 		arg.GithubRepo,
@@ -694,6 +721,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.AiTicketDescription,
 		arg.AiRootCause,
 		arg.AiTriage,
+		arg.StacktraceRules,
 	)
 	var i Project
 	err := row.Scan(
@@ -735,6 +763,9 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.AiTicketDescription,
 		&i.AiRootCause,
 		&i.AiTriage,
+		&i.StacktraceRules,
+		&i.InfoGroupingMode,
+		&i.MaxInfoIssues,
 	)
 	return i, err
 }

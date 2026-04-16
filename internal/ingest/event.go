@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -121,12 +122,7 @@ func (e *SentryEvent) Title() string {
 }
 
 // IssueTitle returns the normalized issue title used for grouping.
-func (e *SentryEvent) IssueTitle() string {
-	if hint, ok := e.groupingHint(); ok && hint.Title != "" {
-		return hint.Title
-	}
-	return e.Title()
-}
+func (e *SentryEvent) IssueTitle() string { return e.Title() }
 
 // Culprit returns a concise location string like "POST /api/v2/bookings".
 func (e *SentryEvent) Culprit() string {
@@ -147,9 +143,6 @@ func (e *SentryEvent) Culprit() string {
 			}
 			return url
 		}
-	}
-	if hint, ok := e.groupingHint(); ok && hint.Culprit != "" {
-		return hint.Culprit
 	}
 	// Fall back to transaction (often the route)
 	if e.Transaction != "" {
@@ -209,11 +202,6 @@ func (e *SentryEvent) defaultFingerprint() string {
 		return fmt.Sprintf("%x", hasher.Sum(nil))[:32]
 	}
 
-	if hint, ok := e.groupingHint(); ok {
-		hasher.Write([]byte(hint.FingerprintKey))
-		return fmt.Sprintf("%x", hasher.Sum(nil))[:32]
-	}
-
 	// For message events: hash the template message
 	if e.Logentry != nil && e.Logentry.Message != "" {
 		hasher.Write([]byte(e.Logentry.Message))
@@ -237,17 +225,6 @@ type groupingHint struct {
 	Culprit        string
 }
 
-func (e *SentryEvent) groupingHint() (groupingHint, bool) {
-	source := e.groupingMessage()
-	if source == "" {
-		return groupingHint{}, false
-	}
-	if hint, ok := parseExcessiveQueriesHint(source); ok {
-		return hint, true
-	}
-	return groupingHint{}, false
-}
-
 func (e *SentryEvent) groupingMessage() string {
 	if e.Logentry != nil {
 		if e.Logentry.Formatted != "" {
@@ -258,30 +235,6 @@ func (e *SentryEvent) groupingMessage() string {
 		}
 	}
 	return e.Message
-}
-
-func parseExcessiveQueriesHint(source string) (groupingHint, bool) {
-	if !strings.Contains(source, "[ExcessiveQueries]") {
-		return groupingHint{}, false
-	}
-
-	method, path := parseMethodAndPathFromMessage(source)
-	if path == "" {
-		return groupingHint{}, false
-	}
-
-	culprit := path
-	key := "message|ExcessiveQueries|" + path
-	if method != "" {
-		culprit = method + " " + path
-		key = "message|ExcessiveQueries|" + method + "|" + path
-	}
-
-	return groupingHint{
-		FingerprintKey: key,
-		Title:          "[ExcessiveQueries] " + culprit,
-		Culprit:        culprit,
-	}, true
 }
 
 func parseMethodAndPathFromMessage(source string) (string, string) {
@@ -347,4 +300,87 @@ func normalizeURLPath(raw string) string {
 	}
 
 	return ""
+}
+
+func hashFingerprintKey(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", sum)[:32]
+}
+
+func (e *SentryEvent) URLGroupingHint() (groupingHint, bool) {
+	method, path := e.requestMethodAndPath()
+	if path == "" {
+		return groupingHint{}, false
+	}
+
+	culprit := path
+	fingerprintKey := "info:url|" + path
+	if method != "" {
+		culprit = method + " " + path
+		fingerprintKey = "info:url|" + method + "|" + path
+	}
+
+	return groupingHint{
+		FingerprintKey: fingerprintKey,
+		Title:          e.groupingTitleFromKey(culprit),
+		Culprit:        culprit,
+	}, true
+}
+
+func (e *SentryEvent) FileGroupingHint() (groupingHint, bool) {
+	filename := e.groupingFilename()
+	if filename == "" {
+		return groupingHint{}, false
+	}
+
+	return groupingHint{
+		FingerprintKey: "info:file|" + filename,
+		Title:          e.groupingTitleFromKey(path.Base(filename)),
+		Culprit:        filename,
+	}, true
+}
+
+func (e *SentryEvent) groupingTitleFromKey(key string) string {
+	if e.Exception != nil && len(e.Exception.Values) > 0 {
+		last := e.Exception.Values[len(e.Exception.Values)-1]
+		if last.Type != "" {
+			return last.Type + ": " + key
+		}
+	}
+	return key
+}
+
+func (e *SentryEvent) requestMethodAndPath() (string, string) {
+	if e.Request != nil {
+		method, _ := e.Request["method"].(string)
+		if rawURL, _ := e.Request["url"].(string); rawURL != "" {
+			if normalized := normalizeURLPath(rawURL); normalized != "" {
+				return strings.ToUpper(strings.TrimSpace(method)), normalized
+			}
+		}
+	}
+
+	method, path := parseMethodAndPathFromMessage(e.groupingMessage())
+	return strings.ToUpper(strings.TrimSpace(method)), path
+}
+
+func (e *SentryEvent) groupingFilename() string {
+	if e.Exception == nil || len(e.Exception.Values) == 0 {
+		return ""
+	}
+
+	last := e.Exception.Values[len(e.Exception.Values)-1]
+	if last.Stacktrace == nil || len(last.Stacktrace.Frames) == 0 {
+		return ""
+	}
+
+	for i := len(last.Stacktrace.Frames) - 1; i >= 0; i-- {
+		frame := last.Stacktrace.Frames[i]
+		if frame.InApp != nil && *frame.InApp && frame.Filename != "" {
+			return frame.Filename
+		}
+	}
+
+	innermost := last.Stacktrace.Frames[len(last.Stacktrace.Frames)-1]
+	return innermost.Filename
 }

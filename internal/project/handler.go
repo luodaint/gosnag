@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -25,82 +26,178 @@ func NewHandler(queries *db.Queries, cache *StatsCache) *Handler {
 }
 
 type CreateProjectRequest struct {
-	Name                   string  `json:"name"`
-	Slug                   string  `json:"slug"`
-	DefaultCooldownMinutes *int32  `json:"default_cooldown_minutes,omitempty"`
-	WarningAsError         *bool   `json:"warning_as_error,omitempty"`
-	MaxEventsPerIssue      *int32  `json:"max_events_per_issue,omitempty"`
-	Icon                   *string `json:"icon,omitempty"`
-	Color                  *string `json:"color,omitempty"`
-	IssueDisplayMode       string  `json:"issue_display_mode"`
-	JiraBaseURL            string  `json:"jira_base_url"`
-	JiraEmail              string  `json:"jira_email"`
-	JiraAPIToken           string  `json:"jira_api_token"`
-	JiraProjectKey         string  `json:"jira_project_key"`
-	JiraIssueType          string  `json:"jira_issue_type"`
-	GithubToken            string  `json:"github_token"`
-	GithubOwner            string  `json:"github_owner"`
-	GithubRepo             string  `json:"github_repo"`
-	GithubLabels           string  `json:"github_labels"`
-	WorkflowMode           string  `json:"workflow_mode"`
-	RepoProvider           string  `json:"repo_provider"`
-	RepoOwner              string  `json:"repo_owner"`
-	RepoName               string  `json:"repo_name"`
-	RepoDefaultBranch      string  `json:"repo_default_branch"`
-	RepoToken              string  `json:"repo_token"`
-	RepoPathStrip          string  `json:"repo_path_strip"`
-	GroupID                *string `json:"group_id,omitempty"`
-	AIEnabled              *bool   `json:"ai_enabled,omitempty"`
-	AIModel                string  `json:"ai_model"`
-	AIMergeSuggestions     *bool   `json:"ai_merge_suggestions,omitempty"`
-	AIAutoMerge            *bool   `json:"ai_auto_merge,omitempty"`
-	AIAnomalyDetection     *bool   `json:"ai_anomaly_detection,omitempty"`
-	AITicketDescription    *bool   `json:"ai_ticket_description,omitempty"`
-	AIRootCause            *bool   `json:"ai_root_cause,omitempty"`
-	AITriage               *bool   `json:"ai_triage,omitempty"`
+	Name                   string           `json:"name"`
+	Slug                   string           `json:"slug"`
+	DefaultCooldownMinutes *int32           `json:"default_cooldown_minutes,omitempty"`
+	WarningAsError         *bool            `json:"warning_as_error,omitempty"`
+	MaxEventsPerIssue      *int32           `json:"max_events_per_issue,omitempty"`
+	MaxInfoIssues          *int32           `json:"max_info_issues,omitempty"`
+	Icon                   *string          `json:"icon,omitempty"`
+	Color                  *string          `json:"color,omitempty"`
+	IssueDisplayMode       string           `json:"issue_display_mode"`
+	InfoGroupingMode       string           `json:"info_grouping_mode"`
+	JiraBaseURL            string           `json:"jira_base_url"`
+	JiraEmail              string           `json:"jira_email"`
+	JiraAPIToken           string           `json:"jira_api_token"`
+	JiraProjectKey         string           `json:"jira_project_key"`
+	JiraIssueType          string           `json:"jira_issue_type"`
+	GithubToken            string           `json:"github_token"`
+	GithubOwner            string           `json:"github_owner"`
+	GithubRepo             string           `json:"github_repo"`
+	GithubLabels           string           `json:"github_labels"`
+	WorkflowMode           string           `json:"workflow_mode"`
+	RepoProvider           string           `json:"repo_provider"`
+	RepoOwner              string           `json:"repo_owner"`
+	RepoName               string           `json:"repo_name"`
+	RepoDefaultBranch      string           `json:"repo_default_branch"`
+	RepoToken              string           `json:"repo_token"`
+	RepoPathStrip          string           `json:"repo_path_strip"`
+	GroupID                *string          `json:"group_id,omitempty"`
+	AIEnabled              *bool            `json:"ai_enabled,omitempty"`
+	AIModel                string           `json:"ai_model"`
+	AIMergeSuggestions     *bool            `json:"ai_merge_suggestions,omitempty"`
+	AIAutoMerge            *bool            `json:"ai_auto_merge,omitempty"`
+	AIAnomalyDetection     *bool            `json:"ai_anomaly_detection,omitempty"`
+	AITicketDescription    *bool            `json:"ai_ticket_description,omitempty"`
+	AIRootCause            *bool            `json:"ai_root_cause,omitempty"`
+	AITriage               *bool            `json:"ai_triage,omitempty"`
+	StacktraceRules        *StacktraceRules `json:"stacktrace_rules,omitempty"`
+}
+
+type StacktraceRules struct {
+	Preset            string   `json:"preset"`
+	AppPatterns       []string `json:"app_patterns"`
+	FrameworkPatterns []string `json:"framework_patterns"`
+	ExternalPatterns  []string `json:"external_patterns"`
 }
 
 // SafeProject strips sensitive fields (Jira API token) from the project for API responses.
 type SafeProject struct {
-	ID                     uuid.UUID `json:"id"`
-	NumericID              int32     `json:"numeric_id"`
-	Name                   string    `json:"name"`
-	Slug                   string    `json:"slug"`
-	DefaultCooldownMinutes int32     `json:"default_cooldown_minutes"`
-	WarningAsError         bool      `json:"warning_as_error"`
-	MaxEventsPerIssue      int32     `json:"max_events_per_issue"`
-	Icon                   string    `json:"icon"`
-	Color                  string    `json:"color"`
-	Position               int32     `json:"position"`
-	JiraBaseURL            string    `json:"jira_base_url"`
-	JiraEmail              string    `json:"jira_email"`
-	JiraAPITokenSet        bool      `json:"jira_api_token_set"`
-	JiraProjectKey         string    `json:"jira_project_key"`
-	JiraIssueType          string    `json:"jira_issue_type"`
-	GithubTokenSet         bool      `json:"github_token_set"`
-	GithubOwner            string    `json:"github_owner"`
-	GithubRepo             string    `json:"github_repo"`
-	GithubLabels           string    `json:"github_labels"`
-	WorkflowMode           string    `json:"workflow_mode"`
-	RepoProvider           string    `json:"repo_provider"`
-	RepoOwner              string    `json:"repo_owner"`
-	RepoName               string    `json:"repo_name"`
-	RepoDefaultBranch      string    `json:"repo_default_branch"`
-	RepoTokenSet           bool      `json:"repo_token_set"`
-	RepoPathStrip          string    `json:"repo_path_strip"`
-	IssueDisplayMode       string    `json:"issue_display_mode"`
-	GroupID                *string   `json:"group_id"`
-	GroupName              string    `json:"group_name,omitempty"`
-	AIEnabled              bool      `json:"ai_enabled"`
-	AIModel                string    `json:"ai_model"`
-	AIMergeSuggestions     bool      `json:"ai_merge_suggestions"`
-	AIAutoMerge            bool      `json:"ai_auto_merge"`
-	AIAnomalyDetection     bool      `json:"ai_anomaly_detection"`
-	AITicketDescription    bool      `json:"ai_ticket_description"`
-	AIRootCause            bool      `json:"ai_root_cause"`
-	AITriage               bool      `json:"ai_triage"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	ID                     uuid.UUID       `json:"id"`
+	NumericID              int32           `json:"numeric_id"`
+	Name                   string          `json:"name"`
+	Slug                   string          `json:"slug"`
+	DefaultCooldownMinutes int32           `json:"default_cooldown_minutes"`
+	WarningAsError         bool            `json:"warning_as_error"`
+	MaxEventsPerIssue      int32           `json:"max_events_per_issue"`
+	MaxInfoIssues          int32           `json:"max_info_issues"`
+	Icon                   string          `json:"icon"`
+	Color                  string          `json:"color"`
+	Position               int32           `json:"position"`
+	InfoGroupingMode       string          `json:"info_grouping_mode"`
+	JiraBaseURL            string          `json:"jira_base_url"`
+	JiraEmail              string          `json:"jira_email"`
+	JiraAPITokenSet        bool            `json:"jira_api_token_set"`
+	JiraProjectKey         string          `json:"jira_project_key"`
+	JiraIssueType          string          `json:"jira_issue_type"`
+	GithubTokenSet         bool            `json:"github_token_set"`
+	GithubOwner            string          `json:"github_owner"`
+	GithubRepo             string          `json:"github_repo"`
+	GithubLabels           string          `json:"github_labels"`
+	WorkflowMode           string          `json:"workflow_mode"`
+	RepoProvider           string          `json:"repo_provider"`
+	RepoOwner              string          `json:"repo_owner"`
+	RepoName               string          `json:"repo_name"`
+	RepoDefaultBranch      string          `json:"repo_default_branch"`
+	RepoTokenSet           bool            `json:"repo_token_set"`
+	RepoPathStrip          string          `json:"repo_path_strip"`
+	IssueDisplayMode       string          `json:"issue_display_mode"`
+	GroupID                *string         `json:"group_id"`
+	GroupName              string          `json:"group_name,omitempty"`
+	AIEnabled              bool            `json:"ai_enabled"`
+	AIModel                string          `json:"ai_model"`
+	AIMergeSuggestions     bool            `json:"ai_merge_suggestions"`
+	AIAutoMerge            bool            `json:"ai_auto_merge"`
+	AIAnomalyDetection     bool            `json:"ai_anomaly_detection"`
+	AITicketDescription    bool            `json:"ai_ticket_description"`
+	AIRootCause            bool            `json:"ai_root_cause"`
+	AITriage               bool            `json:"ai_triage"`
+	StacktraceRules        StacktraceRules `json:"stacktrace_rules"`
+	CreatedAt              time.Time       `json:"created_at"`
+	UpdatedAt              time.Time       `json:"updated_at"`
+}
+
+func defaultStacktraceRules() StacktraceRules {
+	return StacktraceRules{
+		Preset:            "generic",
+		AppPatterns:       []string{},
+		FrameworkPatterns: []string{},
+		ExternalPatterns:  []string{},
+	}
+}
+
+func normalizeInfoGroupingMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case "by_url", "by_file":
+		return strings.TrimSpace(mode)
+	default:
+		return "normal"
+	}
+}
+
+func normalizePatternList(patterns []string) []string {
+	out := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		out = append(out, pattern)
+	}
+	return out
+}
+
+func normalizeStacktraceRules(r StacktraceRules) StacktraceRules {
+	out := defaultStacktraceRules()
+	if strings.TrimSpace(r.Preset) != "" {
+		out.Preset = strings.TrimSpace(r.Preset)
+	}
+	out.AppPatterns = normalizePatternList(r.AppPatterns)
+	out.FrameworkPatterns = normalizePatternList(r.FrameworkPatterns)
+	out.ExternalPatterns = normalizePatternList(r.ExternalPatterns)
+	return out
+}
+
+func validatePatternList(label string, patterns []string) error {
+	for _, pattern := range patterns {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("invalid %s regex %q: %w", label, pattern, err)
+		}
+	}
+	return nil
+}
+
+func validateStacktraceRules(r StacktraceRules) error {
+	if err := validatePatternList("app_patterns", r.AppPatterns); err != nil {
+		return err
+	}
+	if err := validatePatternList("framework_patterns", r.FrameworkPatterns); err != nil {
+		return err
+	}
+	if err := validatePatternList("external_patterns", r.ExternalPatterns); err != nil {
+		return err
+	}
+	return nil
+}
+
+func parseStacktraceRules(raw json.RawMessage) StacktraceRules {
+	if len(raw) == 0 || string(raw) == "null" {
+		return defaultStacktraceRules()
+	}
+	var rules StacktraceRules
+	if err := json.Unmarshal(raw, &rules); err != nil {
+		return defaultStacktraceRules()
+	}
+	return normalizeStacktraceRules(rules)
+}
+
+func marshalStacktraceRules(r StacktraceRules) json.RawMessage {
+	normalized := normalizeStacktraceRules(r)
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		raw, _ = json.Marshal(defaultStacktraceRules())
+	}
+	return raw
 }
 
 func nullUUIDToStringPtr(u uuid.NullUUID) *string {
@@ -120,9 +217,11 @@ func toSafeProject(p db.Project) SafeProject {
 		DefaultCooldownMinutes: p.DefaultCooldownMinutes,
 		WarningAsError:         p.WarningAsError,
 		MaxEventsPerIssue:      p.MaxEventsPerIssue,
+		MaxInfoIssues:          p.MaxInfoIssues,
 		Icon:                   p.Icon,
 		Color:                  p.Color,
 		Position:               p.Position,
+		InfoGroupingMode:       normalizeInfoGroupingMode(p.InfoGroupingMode),
 		JiraBaseURL:            p.JiraBaseUrl,
 		JiraEmail:              p.JiraEmail,
 		JiraAPITokenSet:        p.JiraApiToken != "",
@@ -149,6 +248,7 @@ func toSafeProject(p db.Project) SafeProject {
 		AITicketDescription:    p.AiTicketDescription,
 		AIRootCause:            p.AiRootCause,
 		AITriage:               p.AiTriage,
+		StacktraceRules:        parseStacktraceRules(p.StacktraceRules),
 		CreatedAt:              p.CreatedAt,
 		UpdatedAt:              p.UpdatedAt,
 	}
@@ -226,8 +326,8 @@ type ProjectListItem struct {
 	LatestEvent    string  `json:"latest_event,omitempty"`
 	Trend          []int32 `json:"trend"`
 	LatestRelease  string  `json:"latest_release,omitempty"`
-	ErrorsThisWeek int32  `json:"errors_this_week"`
-	ErrorsLastWeek int32  `json:"errors_last_week"`
+	ErrorsThisWeek int32   `json:"errors_this_week"`
+	ErrorsLastWeek int32   `json:"errors_last_week"`
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -412,6 +512,15 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		maxEvents = *req.MaxEventsPerIssue
 	}
 
+	maxInfoIssues := existing.MaxInfoIssues
+	if req.MaxInfoIssues != nil {
+		if *req.MaxInfoIssues < 0 {
+			writeError(w, http.StatusBadRequest, "max_info_issues must be >= 0")
+			return
+		}
+		maxInfoIssues = *req.MaxInfoIssues
+	}
+
 	icon := existing.Icon
 	if req.Icon != nil {
 		icon = *req.Icon
@@ -424,6 +533,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	issueDisplayMode := existing.IssueDisplayMode
 	if req.IssueDisplayMode != "" {
 		issueDisplayMode = req.IssueDisplayMode
+	}
+
+	infoGroupingMode := normalizeInfoGroupingMode(existing.InfoGroupingMode)
+	if req.InfoGroupingMode != "" {
+		infoGroupingMode = normalizeInfoGroupingMode(req.InfoGroupingMode)
 	}
 
 	aiEnabled := existing.AiEnabled
@@ -459,6 +573,15 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		aiTriage = *req.AITriage
 	}
 
+	stacktraceRules := parseStacktraceRules(existing.StacktraceRules)
+	if req.StacktraceRules != nil {
+		stacktraceRules = normalizeStacktraceRules(*req.StacktraceRules)
+		if err := validateStacktraceRules(stacktraceRules); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	project, err := h.queries.UpdateProject(r.Context(), db.UpdateProjectParams{
 		ID:                     id,
 		Name:                   name,
@@ -471,9 +594,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		JiraProjectKey:         jiraProjectKey,
 		JiraIssueType:          jiraIssueType,
 		MaxEventsPerIssue:      maxEvents,
+		MaxInfoIssues:          maxInfoIssues,
 		Icon:                   icon,
 		Color:                  color,
 		IssueDisplayMode:       issueDisplayMode,
+		InfoGroupingMode:       infoGroupingMode,
 		GithubToken:            githubToken,
 		GithubOwner:            githubOwner,
 		GithubRepo:             githubRepo,
@@ -493,6 +618,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		AiTicketDescription:    aiTicketDescription,
 		AiRootCause:            aiRootCause,
 		AiTriage:               aiTriage,
+		StacktraceRules:        marshalStacktraceRules(stacktraceRules),
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {
