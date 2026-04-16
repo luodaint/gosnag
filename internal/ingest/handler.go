@@ -152,6 +152,11 @@ func (h *Handler) authenticate(r *http.Request) (uuid.UUID, db.ProjectKey, error
 }
 
 func (h *Handler) processEvent(r *http.Request, project db.Project, event *SentryEvent) {
+	// Drop info/debug events — they create too many issues and provide little value
+	if event.Level == "info" || event.Level == "debug" {
+		return
+	}
+
 	ctx := r.Context()
 	projectID := project.ID
 	fingerprint := event.ComputeFingerprint()
