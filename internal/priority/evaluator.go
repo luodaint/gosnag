@@ -76,17 +76,20 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 	// Flatten event data to string for full-text pattern matching
 	eventText := string(eventData)
 
-	// Build searchable text: title + full event data
-	searchText := issue.Title + "\n" + eventText
-
 	// Build shared eval context for the conditions engine
 	loader := &priorityLoader{queries: queries, ctx: ctx, cache: cache}
+	project, err := queries.GetProject(ctx, projectID)
+	stacktraceRules := json.RawMessage(nil)
+	if err == nil {
+		stacktraceRules = project.StacktraceRules
+	}
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Level:      issue.Level,
-		Platform:   issue.Platform,
-		EventCount: issue.EventCount,
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Level:       issue.Level,
+		Platform:    issue.Platform,
+		EventCount:  issue.EventCount,
+		HasAppFrame: conditions.HasAppFrame(eventData, stacktraceRules),
 	}, eventText, loader)
 
 	score := int32(50) // base score
@@ -130,13 +133,13 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 
 			case "title_contains":
 				if rule.Pattern != "" {
-					matched = matchesPattern(rule.Pattern, searchText)
+					matched = matchesPattern(rule.Pattern, issue.Title)
 					slog.Debug("priority: title_contains", "rule_id", rule.ID, "pattern", rule.Pattern, "matched", matched, "issue_title", issue.Title)
 				}
 
 			case "title_not_contains":
 				if rule.Pattern != "" {
-					matched = !matchesPattern(rule.Pattern, searchText)
+					matched = !matchesPattern(rule.Pattern, issue.Title)
 				}
 
 			case "level_is":
@@ -189,6 +192,10 @@ func EvaluateAll(ctx context.Context, queries *db.Queries, aiService *ai.Service
 	if err != nil || len(rules) == 0 {
 		return 0, err
 	}
+	project, err := queries.GetProject(ctx, projectID)
+	if err != nil {
+		return 0, err
+	}
 
 	issueIDs, err := queries.ListIssueIDsByProject(ctx, projectID)
 	if err != nil {
@@ -206,24 +213,24 @@ func EvaluateAll(ctx context.Context, queries *db.Queries, aiService *ai.Service
 		if err == nil && len(events) > 0 {
 			eventData = events[0].Data
 		}
-		evaluateWithRules(ctx, queries, aiService, rules, issue, eventData, onChange)
+		evaluateWithRules(ctx, queries, aiService, rules, issue, eventData, project.StacktraceRules, onChange)
 		count++
 	}
 	return count, nil
 }
 
 // evaluateWithRules scores an issue using pre-loaded rules (avoids reloading per issue).
-func evaluateWithRules(ctx context.Context, queries *db.Queries, aiService *ai.Service, rules []db.PriorityRule, issue db.Issue, eventData json.RawMessage, onChange OnPriorityChange) {
+func evaluateWithRules(ctx context.Context, queries *db.Queries, aiService *ai.Service, rules []db.PriorityRule, issue db.Issue, eventData json.RawMessage, stacktraceRules json.RawMessage, onChange OnPriorityChange) {
 	eventText := string(eventData)
-	searchText := issue.Title + "\n" + eventText
 
 	loader := &priorityLoader{queries: queries, ctx: ctx, cache: cache}
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Level:      issue.Level,
-		Platform:   issue.Platform,
-		EventCount: issue.EventCount,
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Level:       issue.Level,
+		Platform:    issue.Platform,
+		EventCount:  issue.EventCount,
+		HasAppFrame: conditions.HasAppFrame(eventData, stacktraceRules),
 	}, eventText, loader)
 
 	var velocity1h, velocity24h, userCount *int32
@@ -261,12 +268,12 @@ func evaluateWithRules(ctx context.Context, queries *db.Queries, aiService *ai.S
 				matched = compareInt(*userCount, rule.Operator, rule.Threshold)
 			case "title_contains":
 				if rule.Pattern != "" {
-					matched = matchesPattern(rule.Pattern, searchText)
+					matched = matchesPattern(rule.Pattern, issue.Title)
 					slog.Debug("priority: title_contains", "rule_id", rule.ID, "pattern", rule.Pattern, "matched", matched, "issue_title", issue.Title)
 				}
 			case "title_not_contains":
 				if rule.Pattern != "" {
-					matched = !matchesPattern(rule.Pattern, searchText)
+					matched = !matchesPattern(rule.Pattern, issue.Title)
 				}
 			case "level_is":
 				matched = strings.EqualFold(issue.Level, rule.Pattern)

@@ -122,14 +122,16 @@ func (s *Service) Notify(projectID uuid.UUID, issue db.Issue, isNew bool) {
 
 	// Build a shared eval context (lazy-loads velocity/user_count on demand)
 	loader := &dbLoader{queries: s.queries, ctx: ctx}
+	eventData := conditions.LoadLatestEventData(ctx, s.queries, issue.ID)
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Level:      issue.Level,
-		Platform:   issue.Platform,
-		EventCount: issue.EventCount,
-		Priority:   issue.Priority,
-	}, "", loader)
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Level:       issue.Level,
+		Platform:    issue.Platform,
+		EventCount:  issue.EventCount,
+		Priority:    issue.Priority,
+		HasAppFrame: conditions.HasAppFrame(eventData, project.StacktraceRules),
+	}, string(eventData), loader)
 
 	for _, ac := range configs {
 		// New engine: if conditions JSONB is set, use it

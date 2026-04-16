@@ -533,6 +533,7 @@ export interface PriorityRule {
   points: number
   enabled: boolean
   position: number
+  conditions?: object | null
   created_at: string
   updated_at: string
 }
@@ -545,6 +546,7 @@ export type PriorityRuleData = {
   threshold: number
   points: number
   enabled: boolean
+  conditions?: object
 }
 
 export interface RuleSuggestion {

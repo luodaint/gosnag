@@ -108,6 +108,7 @@ export default function ProjectSettings() {
   const [prOperator, setPrOperator] = useState('gte')
   const [prThreshold, setPrThreshold] = useState('')
   const [prPoints, setPrPoints] = useState('')
+  const [prConditions, setPrConditions] = useState<ConditionGroup>({ operator: 'and', conditions: [] })
   const [showDeletePriorityRule, setShowDeletePriorityRule] = useState<string | null>(null)
   const [recalcing, setRecalcing] = useState(false)
   // AI assistant dialog
@@ -813,6 +814,7 @@ export default function ProjectSettings() {
     setPrOperator('gte')
     setPrThreshold('')
     setPrPoints('')
+    setPrConditions({ operator: 'and', conditions: [] })
     setShowPriorityRuleForm(true)
   }
 
@@ -824,6 +826,7 @@ export default function ProjectSettings() {
     setPrOperator(r.operator)
     setPrThreshold(r.threshold > 0 ? String(r.threshold) : '')
     setPrPoints(String(r.points))
+    setPrConditions((r.conditions as ConditionGroup | null) || { operator: 'and', conditions: [] })
     setShowPriorityRuleForm(true)
   }
 
@@ -837,6 +840,7 @@ export default function ProjectSettings() {
       threshold: parseInt(prThreshold) || 0,
       points: parseInt(prPoints) || 0,
       enabled: editingPriorityRule ? editingPriorityRule.enabled : true,
+      conditions: prConditions.conditions.length > 0 ? prConditions : undefined,
     }
     try {
       if (editingPriorityRule) {
@@ -855,7 +859,14 @@ export default function ProjectSettings() {
   const handleTogglePriorityRule = async (r: PriorityRule) => {
     if (!projectId) return
     await api.updatePriorityRule(projectId, r.id, {
-      ...r, enabled: !r.enabled,
+      name: r.name,
+      rule_type: r.rule_type,
+      pattern: r.pattern,
+      operator: r.operator,
+      threshold: r.threshold,
+      points: r.points,
+      enabled: !r.enabled,
+      conditions: r.conditions || undefined,
     })
     setPriorityRules(await api.listPriorityRules(projectId))
   }
@@ -1743,7 +1754,11 @@ export default function ProjectSettings() {
                             )}
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {r.rule_type === 'ai_prompt' ? (
+                            {r.conditions && (r.conditions as ConditionGroup).conditions?.length > 0 ? (
+                              <>
+                                {(r.conditions as ConditionGroup).conditions.length} condition{(r.conditions as ConditionGroup).conditions.length !== 1 ? 's' : ''} ({(r.conditions as ConditionGroup).operator?.toUpperCase()})
+                              </>
+                            ) : r.rule_type === 'ai_prompt' ? (
                               <>
                                 <span className="inline-flex items-center gap-1 rounded bg-purple-500/15 text-purple-400 px-1.5 py-0.5 mr-1">
                                   <Sparkles className="h-3 w-3" /> AI
@@ -1848,6 +1863,17 @@ export default function ProjectSettings() {
                           ? 'Maximum points the AI can assign. AI returns between -points and +points.'
                           : 'Positive = higher priority, negative = lower. Base score is 50, clamped to 0\u2013100.'}
                       </p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Advanced conditions</label>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Optional. If you add conditions here, they decide the match and the simple type/pattern fields above are ignored for matching.
+                      </p>
+                      <ConditionBuilder
+                        value={prConditions}
+                        onChange={setPrConditions}
+                        availableTypes={['level', 'platform', 'title', 'total_events', 'velocity_1h', 'velocity_24h', 'user_count', 'has_app_frame']}
+                      />
                     </div>
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" onClick={() => setShowPriorityRuleForm(false)}>Cancel</Button>
@@ -2948,7 +2974,7 @@ export default function ProjectSettings() {
               <ConditionBuilder
                 value={alertConditions}
                 onChange={setAlertConditions}
-                availableTypes={['level', 'platform', 'title', 'total_events', 'velocity_1h', 'velocity_24h', 'user_count']}
+                availableTypes={['level', 'platform', 'title', 'total_events', 'velocity_1h', 'velocity_24h', 'user_count', 'has_app_frame']}
               />
             </div>
             <div className="flex justify-end gap-2">

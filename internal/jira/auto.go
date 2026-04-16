@@ -38,14 +38,16 @@ func CheckAndCreateTicket(ctx context.Context, queries *db.Queries, baseURL stri
 	if uc, err := queries.GetIssueUserCount(ctx, issue.ID); err == nil {
 		userCount = int32(uc)
 	}
+	eventData := conditions.LoadLatestEventData(ctx, queries, issue.ID)
 
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Level:      issue.Level,
-		Platform:   issue.Platform,
-		EventCount: issue.EventCount,
-	}, "", &jiraLoader{queries: queries, ctx: ctx})
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Level:       issue.Level,
+		Platform:    issue.Platform,
+		EventCount:  issue.EventCount,
+		HasAppFrame: conditions.HasAppFrame(eventData, project.StacktraceRules),
+	}, string(eventData), &jiraLoader{queries: queries, ctx: ctx})
 
 	for _, rule := range rules {
 		if MatchesRule(rule, issue, userCount, evalCtx) {
