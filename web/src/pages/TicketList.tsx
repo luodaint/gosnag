@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { api, type Project, type TicketWithIssue, type User } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
@@ -67,22 +67,6 @@ export default function TicketList() {
     setSearchParams(next)
   }
 
-  const fetchData = useCallback(async () => {
-    if (!projectId) return
-    const [p, t, c, u] = await Promise.all([
-      api.getProject(projectId),
-      api.listTickets(projectId, { status, limit, offset }),
-      api.getTicketCounts(projectId),
-      api.listUsers(),
-    ])
-    setProject(p)
-    setTickets(t.tickets)
-    setTotal(t.total)
-    setCounts(c)
-    setUsers(u)
-    setLoading(false)
-  }, [projectId, status, limit, offset])
-
   const handleCreate = async () => {
     if (!projectId || !newTitle.trim()) return
     try {
@@ -104,7 +88,33 @@ export default function TicketList() {
     }
   }
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    if (!projectId) return
+    let cancelled = false
+
+    void Promise.all([
+      api.getProject(projectId),
+      api.listTickets(projectId, { status, limit, offset }),
+      api.getTicketCounts(projectId),
+      api.listUsers(),
+    ]).then(([p, t, c, u]) => {
+      if (cancelled) return
+      setProject(p)
+      setTickets(t.tickets)
+      setTotal(t.total)
+      setCounts(c)
+      setUsers(u)
+      setLoading(false)
+    }).catch((e: unknown) => {
+      if (cancelled) return
+      toast.error(e instanceof Error ? e.message : 'Failed to load tickets')
+      setLoading(false)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [projectId, status, offset])
 
   const totalAll = Object.values(counts).reduce((a, b) => a + b, 0)
 

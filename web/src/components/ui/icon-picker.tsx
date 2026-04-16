@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -6,25 +6,12 @@ import data from '@emoji-mart/data'
 import Picker from '@emoji-mart/react'
 // @ts-expect-error — no type declarations for internal DynamicIcon module
 import DynamicIcon, { iconNames } from 'lucide-react/dist/esm/DynamicIcon'
-
-export const PROJECT_COLORS = [
-  '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4',
-  '#ef4444', '#f97316', '#84cc16', '#14b8a6', '#6366f1', '#a855f7',
-]
+import { PROJECT_COLORS, resolveIcon } from '@/components/ui/icon-picker-utils'
 
 // Deduplicate icon names (some are aliases)
 const ICON_NAMES = iconNames.filter((n: string) => !n.includes('_'))
 
 const ICONS_PER_PAGE = 80
-
-export function resolveIcon(value: string): React.ReactNode {
-  if (!value) return null
-  if (value.startsWith('lucide:')) {
-    const name = value.slice(7)
-    return <DynamicIcon name={name as never} className="h-5 w-5" />
-  }
-  return <span className="text-lg leading-none">{value}</span>
-}
 
 interface IconPickerProps {
   value: string
@@ -43,13 +30,21 @@ export function IconPicker({ value, color, fallbackColor, onChange, className }:
 
   const activeColor = color || fallbackColor
 
-  // Reset search and page when tab changes or dialog opens
-  useEffect(() => {
-    if (open) {
-      setIconSearch('')
-      setIconPage(0)
-    }
-  }, [open, tab])
+  const resetIconBrowser = useCallback(() => {
+    setIconSearch('')
+    setIconPage(0)
+    gridRef.current?.scrollTo(0, 0)
+  }, [])
+
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (nextOpen) resetIconBrowser()
+  }, [resetIconBrowser])
+
+  const handleTabChange = useCallback((nextTab: 'emoji' | 'icons') => {
+    setTab(nextTab)
+    resetIconBrowser()
+  }, [resetIconBrowser])
 
   const filteredIcons = useMemo(() => {
     if (!iconSearch) return ICON_NAMES
@@ -90,7 +85,7 @@ export function IconPicker({ value, color, fallbackColor, onChange, className }:
         )}
       </button>
 
-      <Dialog open={open} onOpenChange={(v) => { if (!v) setOpen(false) }}>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-w-md p-0 overflow-hidden" onClick={(e) => e.stopPropagation()}>
           <div className="px-5 pt-5 pb-0">
             <DialogTitle>Icon & Color</DialogTitle>
@@ -103,12 +98,12 @@ export function IconPicker({ value, color, fallbackColor, onChange, className }:
               <button
                 type="button"
                 className={cn('px-2.5 py-1 text-xs rounded-md transition-colors', tab === 'emoji' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-                onClick={() => setTab('emoji')}
+                onClick={() => handleTabChange('emoji')}
               >Emoji</button>
               <button
                 type="button"
                 className={cn('px-2.5 py-1 text-xs rounded-md transition-colors', tab === 'icons' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-                onClick={() => setTab('icons')}
+                onClick={() => handleTabChange('icons')}
               >Icons</button>
               {value && (
                 <button

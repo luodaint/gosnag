@@ -311,9 +311,9 @@ export const api = {
     request<{ analysis: DeployAnalysis | null }>(`/projects/${projectId}/deploys/${deployId}/analysis`),
 
   // Global tokens
-  listGlobalTokens: () => request<any[]>('/tokens'),
+  listGlobalTokens: () => request<GlobalToken[]>('/tokens'),
   createGlobalToken: (data: { name: string; permission: string; expires_in?: number }) =>
-    request<any>('/tokens', { method: 'POST', body: JSON.stringify(data) }),
+    request<GlobalToken>('/tokens', { method: 'POST', body: JSON.stringify(data) }),
   deleteGlobalToken: (tokenId: string) =>
     request<void>(`/tokens/${tokenId}`, { method: 'DELETE' }),
 }
@@ -474,6 +474,17 @@ export interface APIToken {
   project_id: string
   name: string
   permission: string
+  token?: string
+  last_used_at: string | null
+  expires_at: string | null
+  created_at: string
+}
+
+export interface GlobalToken {
+  id: string
+  name: string
+  permission: string
+  scope: string
   token?: string
   last_used_at: string | null
   expires_at: string | null

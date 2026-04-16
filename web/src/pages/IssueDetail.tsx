@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/lib/use-auth'
 import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket, type SuspectCommit, type ReleaseInfo, type MergeSuggestion, type AIAnalysis } from '@/lib/api'
@@ -204,7 +204,7 @@ export default function IssueDetail() {
     }
   }
 
-  const updateStatus = async (status: string, cooldown?: number) => {
+  const updateStatus = useCallback(async (status: string, cooldown?: number) => {
     if (!projectId || !issueId) return
     const data: { status: string; cooldown_minutes?: number } = { status }
     if (cooldown && cooldown > 0) data.cooldown_minutes = cooldown
@@ -212,7 +212,7 @@ export default function IssueDetail() {
     setIssue(updated)
     const labels: Record<string, string> = { resolved: 'Issue resolved', ignored: 'Issue ignored', open: 'Issue reopened', snoozed: 'Issue snoozed' }
     toast.success(labels[status] || `Status changed to ${status}`)
-  }
+  }, [projectId, issueId])
 
   const cooldownOptions = [
     {
@@ -328,7 +328,7 @@ export default function IssueDetail() {
     s: () => { if (isActionable) setShowSnooze(true) },
     i: () => { if (isActionable && isErrorLevel) updateStatus('ignored') },
     escape: () => { if (projectId) navigate(`/projects/${projectId}`) },
-  }), [isActionable, isErrorLevel, projectId])
+  }), [isActionable, isErrorLevel, navigate, projectId, updateStatus])
 
   useKeyboardShortcut(shortcuts)
 

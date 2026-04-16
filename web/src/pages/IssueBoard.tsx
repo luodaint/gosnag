@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { DndContext, DragOverlay, useDroppable, useDraggable, PointerSensor, useSensor, useSensors, type DragStartEvent, type DragEndEvent } from '@dnd-kit/core'
 import { api, isApiError, type Project, type TicketWithIssue } from '@/lib/api'
@@ -29,8 +29,8 @@ const LEVEL_COLORS: Record<string, 'error' | 'warning' | 'secondary' | 'outline'
 
 const PRIORITY_LABEL: Record<number, string> = { 90: 'P1', 70: 'P2', 50: 'P3', 25: 'P4' }
 
-function Column({ id, label, color, tickets, counts }: {
-  id: string; label: string; color: string; tickets: TicketWithIssue[]; counts: Record<string, number>
+function Column({ id, label, color, tickets, counts, now }: {
+  id: string; label: string; color: string; tickets: TicketWithIssue[]; counts: Record<string, number>; now: number
 }) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: id === 'escalated' })
   return (
@@ -48,7 +48,7 @@ function Column({ id, label, color, tickets, counts }: {
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[200px]">
         {tickets.map(t => (
-          <TicketCard key={t.id} ticket={t} />
+          <TicketCard key={t.id} ticket={t} now={now} />
         ))}
         {tickets.length === 0 && (
           <div className="text-center py-8 text-xs text-muted-foreground/50">No tickets</div>
@@ -91,7 +91,7 @@ function BottomLane({ id, label, color, tickets, counts }: {
   )
 }
 
-function TicketCard({ ticket, overlay }: { ticket: TicketWithIssue; overlay?: boolean }) {
+function TicketCard({ ticket, now, overlay }: { ticket: TicketWithIssue; now: number; overlay?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: ticket.id,
     disabled: ticket.status === 'escalated',
@@ -101,6 +101,12 @@ function TicketCard({ ticket, overlay }: { ticket: TicketWithIssue; overlay?: bo
   const style = transform ? {
     transform: `translate(${transform.x}px, ${transform.y}px)`,
   } : undefined
+  const dueDate = ticket.due_date ? new Date(ticket.due_date) : null
+  const dueTone = dueDate
+    ? dueDate.getTime() < now ? 'text-red-400'
+      : dueDate.getTime() - now < 86400000 ? 'text-amber-400'
+      : 'text-muted-foreground'
+    : 'text-muted-foreground'
 
   return (
     <div
@@ -144,14 +150,9 @@ function TicketCard({ ticket, overlay }: { ticket: TicketWithIssue; overlay?: bo
             <span className="text-[10px] text-muted-foreground truncate max-w-[100px]">{ticket.assignee_name}</span>
           )}
         </div>
-        {ticket.due_date && (
-          <div className={cn(
-            'text-[10px] mt-1',
-            new Date(ticket.due_date) < new Date() ? 'text-red-400' :
-            new Date(ticket.due_date).getTime() - Date.now() < 86400000 ? 'text-amber-400' :
-            'text-muted-foreground'
-          )}>
-            Due {new Date(ticket.due_date).toLocaleDateString()}
+        {dueDate && (
+          <div className={cn('text-[10px] mt-1', dueTone)}>
+            Due {dueDate.toLocaleDateString()}
           </div>
         )}
       </Link>
@@ -167,6 +168,7 @@ export default function IssueBoard() {
   const [loading, setLoading] = useState(true)
   const [activeTicket, setActiveTicket] = useState<TicketWithIssue | null>(null)
   const [forceConfirm, setForceConfirm] = useState<{ ticketId: string; from: string; to: string } | null>(null)
+  const [now, setNow] = useState(() => Date.now())
 
   const handleForceTransition = async () => {
     if (!forceConfirm || !projectId) return
@@ -198,20 +200,35 @@ export default function IssueBoard() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
-  const fetchData = useCallback(async () => {
+  useEffect(() => {
+    const timerId = window.setInterval(() => setNow(Date.now()), 60000)
+    return () => window.clearInterval(timerId)
+  }, [])
+
+  useEffect(() => {
     if (!projectId) return
-    const [p, t, c] = await Promise.all([
+    let cancelled = false
+
+    void Promise.all([
       api.getProject(projectId),
       api.listTickets(projectId, { limit: 200 }),
       api.getTicketCounts(projectId),
-    ])
-    setProject(p)
-    setTickets(t.tickets)
-    setCounts(c)
-    setLoading(false)
-  }, [projectId])
+    ]).then(([p, t, c]) => {
+      if (cancelled) return
+      setProject(p)
+      setTickets(t.tickets)
+      setCounts(c)
+      setLoading(false)
+    }).catch((e: unknown) => {
+      if (cancelled) return
+      toast.error(e instanceof Error ? e.message : 'Failed to load board')
+      setLoading(false)
+    })
 
-  useEffect(() => { fetchData() }, [fetchData])
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
 
   const handleDragStart = (event: DragStartEvent) => {
     const t = event.active.data.current?.ticket as TicketWithIssue | undefined
@@ -290,6 +307,7 @@ export default function IssueBoard() {
               color={col.color}
               tickets={tickets.filter(t => t.status === col.id)}
               counts={counts}
+              now={now}
             />
           ))}
         </div>
@@ -309,7 +327,7 @@ export default function IssueBoard() {
         </div>
 
         <DragOverlay>
-          {activeTicket && <TicketCard ticket={activeTicket} overlay />}
+          {activeTicket && <TicketCard ticket={activeTicket} now={now} overlay />}
         </DragOverlay>
       </DndContext>
 
