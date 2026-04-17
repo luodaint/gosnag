@@ -2,6 +2,7 @@ package sourcecode
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,6 +30,36 @@ func (g *GitHubProvider) FileURL(path string, line int, commitOrBranch string) s
 	return u
 }
 
+func (g *GitHubProvider) GetFile(ctx context.Context, path string, ref string) ([]byte, error) {
+	cleanPath := g.cfg.StripPath(path)
+	if ref == "" {
+		ref = g.cfg.DefaultBranch
+	}
+	body, err := g.apiGet(ctx, fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", g.cfg.Owner, g.cfg.Name, cleanPath, url.QueryEscape(ref)))
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Type     string `json:"type"`
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	if payload.Type != "file" {
+		return nil, fmt.Errorf("path %q is not a file", cleanPath)
+	}
+	if payload.Encoding != "base64" {
+		return nil, fmt.Errorf("unsupported github content encoding %q", payload.Encoding)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(payload.Content, "\n", ""))
+	if err != nil {
+		return nil, err
+	}
+	return decoded, nil
+}
+
 func (g *GitHubProvider) GetCommitsForFiles(ctx context.Context, files []string, since time.Time) ([]Commit, error) {
 	seen := map[string]bool{}
 	var commits []Commit
@@ -46,9 +77,9 @@ func (g *GitHubProvider) GetCommitsForFiles(ctx context.Context, files []string,
 		}
 
 		var ghCommits []struct {
-			SHA    string `json:"sha"`
+			SHA     string `json:"sha"`
 			HTMLURL string `json:"html_url"`
-			Commit struct {
+			Commit  struct {
 				Message string `json:"message"`
 				Author  struct {
 					Name  string    `json:"name"`

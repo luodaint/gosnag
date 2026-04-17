@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/lib/use-auth'
-import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket, type SuspectCommit, type ReleaseInfo, type MergeSuggestion, type AIAnalysis } from '@/lib/api'
+import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket, type SuspectCommit, type ReleaseInfo, type MergeSuggestion, type AIAnalysis, type BreadcrumbValue, type DBQueryAnalysis } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
@@ -684,7 +684,14 @@ export default function IssueDetail() {
               </div>
             </div>
             <div className="px-4 pb-4">
-              <EventData data={events[0].data} project={project} />
+              <EventData
+                data={events[0].data}
+                project={project}
+                projectId={projectId}
+                issueId={issueId}
+                issueCulprit={issue?.culprit}
+                isAdmin={currentUser?.role === 'admin'}
+              />
             </div>
           </div>
         </>
@@ -968,7 +975,14 @@ export default function IssueDetail() {
                     <Copy className="h-3.5 w-3.5 mr-1" /> Copy full
                   </Button>
                 </div>
-                <EventData data={event.data} project={project} />
+                <EventData
+                  data={event.data}
+                  project={project}
+                  projectId={projectId}
+                  issueId={issueId}
+                  issueCulprit={issue?.culprit}
+                  isAdmin={currentUser?.role === 'admin'}
+                />
               </div>
             )}
           </div>
@@ -1267,18 +1281,203 @@ const BREADCRUMB_COLORS: Record<string, string> = {
   log: 'text-slate-400',
 }
 
-function BreadcrumbsSection({ breadcrumbs }: { breadcrumbs: { values?: Array<{ type?: string; category?: string; message?: string; data?: Record<string, unknown>; level?: string; timestamp?: string | number }> } }) {
-  const values = breadcrumbs?.values
-  if (!values?.length) return null
+function formatDuration(ms?: number | null) {
+  if (ms == null || Number.isNaN(ms)) return '—'
+  if (ms < 1) return `${ms.toFixed(2)}ms`
+  if (ms < 10) return `${ms.toFixed(2)}ms`
+  if (ms < 100) return `${ms.toFixed(1)}ms`
+  return `${Math.round(ms)}ms`
+}
+
+function getSQLDuration(data?: Record<string, unknown>) {
+  const raw = data?.duration_ms
+  if (typeof raw === 'number') return raw
+  if (typeof raw === 'string') {
+    const value = Number(raw)
+    return Number.isFinite(value) ? value : null
+  }
+  return null
+}
+
+function hasDBQueryBreadcrumbs(values?: BreadcrumbValue[]) {
+  return !!values?.some(crumb => {
+    const category = (crumb.category || crumb.type || '').toLowerCase()
+    return category.includes('db.query') || category === 'query'
+  })
+}
+
+function BreadcrumbsSection({
+  breadcrumbs,
+  project,
+  projectId,
+  issueId,
+  isAdmin,
+}: {
+  breadcrumbs: { values?: BreadcrumbValue[] }
+  project?: Project | null
+  projectId?: string
+  issueId?: string
+  isAdmin?: boolean
+}) {
+  const values = breadcrumbs?.values || []
+  const [analysis, setAnalysis] = useState<DBQueryAnalysis | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const sqlBreadcrumbs = hasDBQueryBreadcrumbs(values)
+
+  if (!values.length) return null
+
+  const handleAnalyzeQueries = async () => {
+    if (!projectId || !issueId || !values?.length) return
+    setAnalyzing(true)
+    try {
+      const result = await api.analyzeIssueDBQueries(projectId, issueId)
+      setAnalysis(result)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to analyze SQL breadcrumbs')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const handleExplainQuery = async (normalizedSQL: string) => {
+    if (!projectId || !issueId || !analysis) return
+    try {
+      const result = await api.explainIssueDBQuery(projectId, issueId, { normalized_sql: normalizedSQL })
+      setAnalysis(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          summary: {
+            ...prev.summary,
+            explain_attempted: prev.summary.explain_attempted + 1,
+            explain_completed: prev.summary.explain_completed + (result.plan ? 1 : 0),
+          },
+          queries: prev.queries.map(query =>
+            query.normalized_sql === normalizedSQL
+              ? {
+                  ...query,
+                  explain_plan: result.plan,
+                  explain_error: result.error,
+                  explain_warnings: result.warnings,
+                }
+              : query
+          ),
+        }
+      })
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to run EXPLAIN')
+    }
+  }
+
   return (
     <div>
-      <SectionHeader title="Breadcrumbs" count={values.length} />
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <SectionHeader title="Breadcrumbs" count={values.length} />
+        {sqlBreadcrumbs && (
+          <div className="flex items-center gap-2">
+            {project && !(project.analysis_db_enabled && project.analysis_db_configured) && (
+              <span className="text-xs text-muted-foreground">
+                Configure Database Analysis in Project Settings to enable query analysis.
+              </span>
+            )}
+            {!isAdmin && (
+              <span className="text-xs text-muted-foreground">
+                SQL analysis is restricted to admins.
+              </span>
+            )}
+            <Button
+              size="sm"
+              variant={analysis ? 'outline' : 'default'}
+              onClick={handleAnalyzeQueries}
+              disabled={analyzing || !projectId || !issueId || !project?.analysis_db_enabled || !project?.analysis_db_configured || !isAdmin}
+            >
+              {analyzing ? 'Analyzing...' : analysis ? 'Reanalyze SQL' : 'Analyze SQL'}
+            </Button>
+          </div>
+        )}
+      </div>
+      {analysis && (
+        <div className="mb-4 rounded-lg border border-border/60 bg-accent/20 p-4">
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Badge variant="outline">{analysis.summary.query_count} queries</Badge>
+            <Badge variant="outline">{analysis.summary.unique_query_count} unique</Badge>
+            <Badge variant="outline">{formatDuration(analysis.summary.total_duration_ms)} total</Badge>
+            <Badge variant="outline">Timing {analysis.summary.timing_availability}</Badge>
+            {analysis.summary.n_plus_one_candidates > 0 && (
+              <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-300">
+                {analysis.summary.n_plus_one_candidates} N+1 candidates
+              </Badge>
+            )}
+            {analysis.summary.missing_timing_count > 0 && (
+              <Badge variant="outline" className="border-slate-500/40 bg-slate-500/10 text-slate-300">
+                {analysis.summary.missing_timing_count} without timing
+              </Badge>
+            )}
+            {analysis.summary.explain_attempted > 0 && (
+              <Badge variant="outline">
+                Explain {analysis.summary.explain_completed}/{analysis.summary.explain_attempted}
+              </Badge>
+            )}
+          </div>
+          {analysis.warnings.length > 0 && (
+            <div className="mb-3 space-y-1">
+              {analysis.warnings.map((warning, index) => (
+                <p key={index} className="text-xs text-muted-foreground">{warning}</p>
+              ))}
+            </div>
+          )}
+          <div className="space-y-3">
+            {analysis.queries.slice(0, 8).map((query, index) => (
+              <div key={`${query.normalized_sql}-${index}`} className="rounded-md border border-border/50 bg-background/60 p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{query.query_type}</Badge>
+                  {query.likely_entity && <Badge variant="outline">{query.likely_entity}</Badge>}
+                  <Badge variant="outline">{query.count}x</Badge>
+                  <Badge variant="outline">{formatDuration(query.total_duration_ms)} total</Badge>
+                  <Badge variant="outline">{formatDuration(query.avg_duration_ms)} avg</Badge>
+                  {query.suspected_n_plus_one && (
+                    <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-300">
+                      N+1 candidate
+                    </Badge>
+                  )}
+                </div>
+                <pre className="overflow-x-auto rounded-md bg-[#0d1117] p-3 text-xs font-mono text-foreground/80">
+                  {query.sample_sql}
+                </pre>
+                {query.query_type === 'select' && isAdmin && project?.analysis_db_enabled && project?.analysis_db_configured && (
+                  <div className="mt-2 flex justify-end">
+                    <Button size="sm" variant="outline" onClick={() => handleExplainQuery(query.normalized_sql)}>
+                      {query.explain_plan || query.explain_error ? 'Run EXPLAIN Again' : 'Run EXPLAIN'}
+                    </Button>
+                  </div>
+                )}
+                {(query.explain_plan || query.explain_error) && (
+                  <div className="mt-2">
+                    <p className="mb-1 text-xs text-muted-foreground">Explain</p>
+                    <pre className="overflow-x-auto rounded-md bg-[#0d1117] p-3 text-xs font-mono text-foreground/70">
+                      {query.explain_plan || query.explain_error}
+                    </pre>
+                    {!!query.explain_warnings?.length && (
+                      <div className="mt-2 space-y-1">
+                        {query.explain_warnings.map((warning, warnIndex) => (
+                          <p key={warnIndex} className="text-xs text-muted-foreground">{warning}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="rounded-lg border border-border/60 overflow-hidden bg-[#0d1117]">
         <table className="w-full text-xs font-mono">
           <thead>
             <tr className="border-b border-border/40 text-muted-foreground/60">
               <th className="px-3 py-2 text-left w-[140px]">Time</th>
               <th className="px-3 py-2 text-left w-[100px]">Category</th>
+              <th className="px-3 py-2 text-left w-[90px]">Duration</th>
               <th className="px-3 py-2 text-left">Message / Data</th>
               <th className="px-3 py-2 text-left w-[60px]">Level</th>
             </tr>
@@ -1294,11 +1493,15 @@ function BreadcrumbsSection({ breadcrumbs }: { breadcrumbs: { values?: Array<{ t
               const colorKey = cat.includes('query') ? 'query' : cat.includes('http') ? 'http' : cat.includes('navigation') ? 'navigation' : crumb.level || 'default'
               const color = BREADCRUMB_COLORS[colorKey] || BREADCRUMB_COLORS.default
               const message = crumb.message || (crumb.data ? JSON.stringify(crumb.data) : '')
+              const duration = getSQLDuration(crumb.data)
               return (
                 <tr key={i} className="border-b border-border/20 hover:bg-white/[0.02] transition-colors">
                   <td className="px-3 py-1.5 text-muted-foreground/50 whitespace-nowrap">{ts}</td>
                   <td className={cn('px-3 py-1.5 whitespace-nowrap', color)}>{cat}</td>
-                  <td className="px-3 py-1.5 text-foreground/80 break-all">{message}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground/60 whitespace-nowrap">{duration == null ? '—' : formatDuration(duration)}</td>
+                  <td className="px-3 py-1.5 text-foreground/80 break-all">
+                    <pre className="whitespace-pre-wrap break-all font-mono text-xs text-inherit">{message}</pre>
+                  </td>
                   <td className="px-3 py-1.5 text-muted-foreground/50">{crumb.level}</td>
                 </tr>
               )
@@ -1310,8 +1513,39 @@ function BreadcrumbsSection({ breadcrumbs }: { breadcrumbs: { values?: Array<{ t
   )
 }
 
-function RequestSection({ request }: { request: { method?: string; url?: string; headers?: Record<string, string>; query_string?: string; data?: unknown; env?: Record<string, string> } }) {
+function extractRequestPath(url?: string) {
+  if (!url) return ''
+  try {
+    return new URL(url).pathname || ''
+  } catch {
+    const match = url.match(/^[A-Za-z]+:\/\/[^/]+(\/[^?#]*)/)
+    if (match?.[1]) return match[1]
+    return url.startsWith('/') ? url : ''
+  }
+}
+
+function extractCanonicalPath(culprit?: string, method?: string) {
+  const trimmed = culprit?.trim() || ''
+  if (!trimmed) return ''
+  const normalizedMethod = (method || '').trim().toUpperCase()
+  if (normalizedMethod && trimmed.toUpperCase().startsWith(`${normalizedMethod} `)) {
+    return trimmed.slice(normalizedMethod.length + 1).trim()
+  }
+  return trimmed.startsWith('/') ? trimmed : ''
+}
+
+function RequestSection({
+  request,
+  canonicalRoute,
+}: {
+  request: { method?: string; url?: string; headers?: Record<string, string>; query_string?: string; data?: unknown; env?: Record<string, string> }
+  canonicalRoute?: string
+}) {
   if (!request) return null
+  const rawPath = extractRequestPath(request.url)
+  const canonicalPath = extractCanonicalPath(canonicalRoute, request.method)
+  const showCanonicalRoute = !!rawPath && !!canonicalPath && rawPath !== canonicalPath
+
   return (
     <div>
       <SectionHeader title="Request" />
@@ -1324,6 +1558,13 @@ function RequestSection({ request }: { request: { method?: string; url?: string;
             {request.url && (
               <span className="font-mono text-sm text-blue-300/70 break-all">{request.url}</span>
             )}
+          </div>
+        )}
+        {showCanonicalRoute && (
+          <div className="px-4 py-3 border-b border-emerald-500/10 bg-emerald-500/5">
+            <p className="text-xs text-emerald-300/80">
+              Route grouping normalized this request to <span className="font-mono">{request.method ? `${request.method} ${canonicalPath}` : canonicalPath}</span>
+            </p>
           </div>
         )}
         <div className="bg-[#0d1117] divide-y divide-border/20">
@@ -1494,11 +1735,25 @@ function formatEventSummary(data: Record<string, unknown>): string {
   return lines.join('\n')
 }
 
-function EventData({ data, project }: { data: Record<string, unknown>; project?: Project | null }) {
+function EventData({
+  data,
+  project,
+  projectId,
+  issueId,
+  issueCulprit,
+  isAdmin,
+}: {
+  data: Record<string, unknown>
+  project?: Project | null
+  projectId?: string
+  issueId?: string
+  issueCulprit?: string
+  isAdmin?: boolean
+}) {
   const [activeTab, setActiveTab] = useState('')
   const exception = data.exception as { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<{ filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }> } }> } | undefined
   const request = data.request as { method?: string; url?: string; headers?: Record<string, string>; query_string?: string; data?: unknown; env?: Record<string, string> } | undefined
-  const breadcrumbs = data.breadcrumbs as { values?: Array<{ type?: string; category?: string; message?: string; data?: Record<string, unknown>; level?: string; timestamp?: string | number }> } | undefined
+  const breadcrumbs = data.breadcrumbs as { values?: BreadcrumbValue[] } | undefined
   const tags = data.tags as Record<string, string> | Array<[string, string]> | undefined
   const contexts = data.contexts as Record<string, Record<string, unknown>> | undefined
   const user = data.user as { id?: string; email?: string; username?: string; ip_address?: string; [key: string]: unknown } | undefined
@@ -1545,10 +1800,18 @@ function EventData({ data, project }: { data: Record<string, unknown>; project?:
         ))}
       </div>
       {current === 'stacktrace' && exception && <ExceptionSection exception={exception} project={project || null} />}
-      {current === 'request' && request && <RequestSection request={request} />}
+      {current === 'request' && request && <RequestSection request={request} canonicalRoute={project?.route_grouping_enabled ? issueCulprit : ''} />}
       {current === 'user' && user && <UserSection user={user} />}
       {current === 'context' && contexts && <ContextsSection contexts={contexts} />}
-      {current === 'breadcrumbs' && breadcrumbs && <BreadcrumbsSection breadcrumbs={breadcrumbs} />}
+      {current === 'breadcrumbs' && breadcrumbs && (
+        <BreadcrumbsSection
+          breadcrumbs={breadcrumbs}
+          project={project}
+          projectId={projectId}
+          issueId={issueId}
+          isAdmin={isAdmin}
+        />
+      )}
       {current === 'tags' && tags && <TagsSection tags={tags} />}
       {current === 'raw' && (
         <pre className="bg-[#0d1117] rounded-lg p-4 text-xs font-mono overflow-x-auto max-h-96 text-foreground/80 border border-border/60">

@@ -66,6 +66,15 @@ export const api = {
     request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   testDBAnalysisConnection: (projectId: string) =>
     request<{ ok: boolean; error?: string }>(`/projects/${projectId}/db-analysis/test`, { method: 'POST' }),
+  listRouteRules: (projectId: string) => request<RouteRule[]>(`/projects/${projectId}/route-rules`),
+  createRouteRule: (projectId: string, data: RouteRuleInput) =>
+    request<RouteRule>(`/projects/${projectId}/route-rules`, { method: 'POST', body: JSON.stringify(data) }),
+  importRouteRules: (projectId: string, data?: { source?: string }) =>
+    request<{ imported: number; source: string; rules: RouteRule[] }>(`/projects/${projectId}/route-rules/import`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  updateRouteRule: (projectId: string, ruleId: string, data: RouteRuleInput) =>
+    request<RouteRule>(`/projects/${projectId}/route-rules/${ruleId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteRouteRule: (projectId: string, ruleId: string) =>
+    request<void>(`/projects/${projectId}/route-rules/${ruleId}`, { method: 'DELETE' }),
   reorderProjects: (items: { id: string; position: number }[]) =>
     request<void>('/projects/reorder', { method: 'PUT', body: JSON.stringify(items) }),
   deleteProject: (id: string) =>
@@ -125,6 +134,10 @@ export const api = {
     if (params?.offset) q.set('offset', String(params.offset))
     return request<EventListResponse>(`/projects/${projectId}/issues/${issueId}/events?${q}`)
   },
+  analyzeIssueDBQueries: (projectId: string, issueId: string) =>
+    request<DBQueryAnalysis>(`/projects/${projectId}/issues/${issueId}/db-analysis`, { method: 'POST' }),
+  explainIssueDBQuery: (projectId: string, issueId: string, data: { normalized_sql: string }) =>
+    request<{ normalized_sql: string; plan?: string; warnings?: string[]; error?: string }>(`/projects/${projectId}/issues/${issueId}/db-analysis/explain`, { method: 'POST', body: JSON.stringify(data) }),
 
   // Users
   listUsers: () => request<User[]>('/users'),
@@ -394,6 +407,8 @@ export interface Project {
   analysis_db_name: string
   analysis_db_schema: string
   analysis_db_notes: string
+  framework: string
+  route_grouping_enabled: boolean
   created_at: string
   total_issues?: number
   open_issues?: number
@@ -407,6 +422,36 @@ export interface Project {
 export interface ProjectWithDSN extends Project {
   dsn: string
   legacy_dsn: string
+}
+
+export interface RouteRule {
+  id: string
+  project_id: string
+  method: string
+  match_pattern: string
+  canonical_path: string
+  target: string
+  source: string
+  confidence: number
+  enabled: boolean
+  framework: string
+  source_file: string
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RouteRuleInput {
+  method: string
+  match_pattern: string
+  canonical_path: string
+  target: string
+  source: string
+  confidence: number
+  enabled: boolean
+  framework: string
+  source_file?: string
+  notes?: string
 }
 
 export interface Issue {
@@ -461,6 +506,15 @@ export interface Event {
   environment: string
   server_name: string
   data: Record<string, unknown>
+}
+
+export interface BreadcrumbValue {
+  type?: string
+  category?: string
+  message?: string
+  data?: Record<string, unknown>
+  level?: string
+  timestamp?: string | number
 }
 
 export interface EventListResponse {
@@ -780,6 +834,35 @@ export interface AIAnalysis {
   model: string
   version: number
   created_at: string
+}
+
+export interface DBQueryAnalysis {
+  summary: {
+    query_count: number
+    unique_query_count: number
+    total_duration_ms: number
+    missing_timing_count: number
+    timing_availability: string
+    n_plus_one_candidates: number
+    explain_attempted: number
+    explain_completed: number
+  }
+  queries: Array<{
+    normalized_sql: string
+    sample_sql: string
+    query_type: string
+    likely_entity?: string
+    count: number
+    total_duration_ms: number
+    avg_duration_ms: number
+    max_duration_ms: number
+    missing_timing_count: number
+    suspected_n_plus_one: boolean
+    explain_plan?: string
+    explain_error?: string
+    explain_warnings?: string[]
+  }>
+  warnings: string[]
 }
 
 export interface DeployAnalysis {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type TagSuggestion, type AIUsage, type RuleSuggestion, type StacktraceRules } from '@/lib/api'
+import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type TagSuggestion, type AIUsage, type RuleSuggestion, type RouteRule, type RouteRuleInput, type StacktraceRules } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -171,6 +171,24 @@ export default function ProjectSettings() {
   const [analysisDbNotes, setAnalysisDbNotes] = useState('')
   const [savingAnalysisDb, setSavingAnalysisDb] = useState(false)
   const [testingAnalysisDb, setTestingAnalysisDb] = useState(false)
+  const [framework, setFramework] = useState('generic')
+  const [routeGroupingEnabled, setRouteGroupingEnabled] = useState(false)
+  const [routeRules, setRouteRules] = useState<RouteRule[]>([])
+  const [importingRouteRules, setImportingRouteRules] = useState(false)
+  const [updatingRouteRuleId, setUpdatingRouteRuleId] = useState<string | null>(null)
+  const [routeImportSource, setRouteImportSource] = useState('source_code')
+  const [routeSourceFilter, setRouteSourceFilter] = useState('all')
+  const [routeConfidenceFilter, setRouteConfidenceFilter] = useState('all')
+  const [editingRouteRule, setEditingRouteRule] = useState<RouteRule | null>(null)
+  const [showRouteRuleForm, setShowRouteRuleForm] = useState(false)
+  const [routeRuleMethod, setRouteRuleMethod] = useState('*')
+  const [routeRuleMatchPattern, setRouteRuleMatchPattern] = useState('')
+  const [routeRuleCanonicalPath, setRouteRuleCanonicalPath] = useState('')
+  const [routeRuleTarget, setRouteRuleTarget] = useState('')
+  const [routeRuleSource, setRouteRuleSource] = useState('manual')
+  const [routeRuleConfidence, setRouteRuleConfidence] = useState('1')
+  const [routeRuleEnabled, setRouteRuleEnabled] = useState(true)
+  const [routeRuleNotes, setRouteRuleNotes] = useState('')
   const [stacktracePreset, setStacktracePreset] = useState('generic')
   const [stacktraceRules, setStacktraceRules] = useState<StacktraceRules>(buildStacktraceRulesPreset('generic'))
   const [repoTesting, setRepoTesting] = useState(false)
@@ -237,6 +255,8 @@ export default function ProjectSettings() {
     setAnalysisDbName(p.analysis_db_name || '')
     setAnalysisDbSchema(p.analysis_db_schema || '')
     setAnalysisDbNotes(p.analysis_db_notes || '')
+    setFramework(p.framework || 'generic')
+    setRouteGroupingEnabled(p.route_grouping_enabled)
     const nextStacktraceRules = normalizeStacktraceRules(p.stacktrace_rules)
     setStacktraceRules(nextStacktraceRules)
     setStacktracePreset(nextStacktraceRules.preset || 'generic')
@@ -269,6 +289,8 @@ export default function ProjectSettings() {
     max_info_issues: parseInt(maxInfoIssues) || 0,
     issue_display_mode: issueDisplayMode,
     info_grouping_mode: infoGroupingMode,
+    framework,
+    route_grouping_enabled: routeGroupingEnabled,
     stacktrace_rules: stacktraceRules,
   })
 
@@ -308,11 +330,54 @@ export default function ProjectSettings() {
   const buildAnalysisDBPayload = () => ({
     analysis_db_enabled: analysisDbEnabled,
     analysis_db_driver: analysisDbDriver,
-    analysis_db_dsn: analysisDbDsn,
+    ...(analysisDbDsn.trim() ? { analysis_db_dsn: analysisDbDsn } : {}),
     analysis_db_name: analysisDbName,
     analysis_db_schema: analysisDbSchema,
     analysis_db_notes: analysisDbNotes,
   })
+
+  const buildRouteRulePayload = (): RouteRuleInput => ({
+    method: routeRuleMethod,
+    match_pattern: routeRuleMatchPattern,
+    canonical_path: routeRuleCanonicalPath,
+    target: routeRuleTarget,
+    source: routeRuleSource,
+    confidence: parseFloat(routeRuleConfidence) || 0.5,
+    enabled: routeRuleEnabled,
+    framework,
+    source_file: editingRouteRule?.source_file || '',
+    notes: routeRuleNotes,
+  })
+
+  const resetRouteRuleForm = () => {
+    setEditingRouteRule(null)
+    setRouteRuleMethod('*')
+    setRouteRuleMatchPattern('')
+    setRouteRuleCanonicalPath('')
+    setRouteRuleTarget('')
+    setRouteRuleSource('manual')
+    setRouteRuleConfidence('1')
+    setRouteRuleEnabled(true)
+    setRouteRuleNotes('')
+  }
+
+  const openCreateRouteRule = () => {
+    resetRouteRuleForm()
+    setShowRouteRuleForm(true)
+  }
+
+  const openEditRouteRule = (rule: RouteRule) => {
+    setEditingRouteRule(rule)
+    setRouteRuleMethod(rule.method || '*')
+    setRouteRuleMatchPattern(rule.match_pattern)
+    setRouteRuleCanonicalPath(rule.canonical_path)
+    setRouteRuleTarget(rule.target || '')
+    setRouteRuleSource(rule.source || 'manual')
+    setRouteRuleConfidence(String(rule.confidence || 0.5))
+    setRouteRuleEnabled(rule.enabled)
+    setRouteRuleNotes(rule.notes || '')
+    setShowRouteRuleForm(true)
+  }
 
   const updateStacktracePatternGroup = (key: 'app_patterns' | 'framework_patterns' | 'external_patterns', value: string) => {
     setStacktraceRules(prev => ({
@@ -341,6 +406,7 @@ export default function ProjectSettings() {
       api.listGroups().then(setAllGroups),
       api.listPriorityRules(projectId).then(setPriorityRules),
       api.listTagRules(projectId).then(setTagRules),
+      api.listRouteRules(projectId).then(setRouteRules),
       api.getAIStatus(projectId).then(s => { setAiProviderConfigured(s.provider_configured); setAiProviderName(s.provider) }).catch(() => {}),
       api.getAIUsage(projectId).then(setAiUsage).catch(() => {}),
     ]).finally(() => setLoading(false))
@@ -393,6 +459,81 @@ export default function ProjectSettings() {
       toast.error(e instanceof Error ? e.message : 'Failed to save issue settings')
     } finally {
       setSavingIssues(false)
+    }
+  }
+
+  const handleImportRouteRules = async () => {
+    if (!projectId) return
+    setImportingRouteRules(true)
+    try {
+      const result = await api.importRouteRules(projectId, { source: routeImportSource })
+      setRouteRules(result.rules)
+      await refreshProject(projectId)
+      toast.success(`Imported ${result.imported} ${result.source.replace('_', ' ')} route rules`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to import route rules')
+    } finally {
+      setImportingRouteRules(false)
+    }
+  }
+
+  const handleToggleRouteRule = async (rule: RouteRule, enabled: boolean) => {
+    if (!projectId) return
+    setUpdatingRouteRuleId(rule.id)
+    try {
+      const updated = await api.updateRouteRule(projectId, rule.id, {
+        method: rule.method,
+        match_pattern: rule.match_pattern,
+        canonical_path: rule.canonical_path,
+        target: rule.target,
+        source: rule.source,
+        confidence: rule.confidence,
+        enabled,
+        framework: rule.framework,
+        source_file: rule.source_file,
+        notes: rule.notes,
+      })
+      setRouteRules(prev => prev.map(item => (item.id === updated.id ? updated : item)))
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update route rule')
+    } finally {
+      setUpdatingRouteRuleId(null)
+    }
+  }
+
+  const handleSaveRouteRule = async () => {
+    if (!projectId) return
+    setUpdatingRouteRuleId(editingRouteRule?.id || 'new')
+    try {
+      if (editingRouteRule) {
+        const updated = await api.updateRouteRule(projectId, editingRouteRule.id, buildRouteRulePayload())
+        setRouteRules(prev => prev.map(item => (item.id === updated.id ? updated : item)))
+        toast.success('Route rule updated')
+      } else {
+        const created = await api.createRouteRule(projectId, buildRouteRulePayload())
+        setRouteRules(prev => [created, ...prev])
+        toast.success('Route rule created')
+      }
+      setShowRouteRuleForm(false)
+      resetRouteRuleForm()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save route rule')
+    } finally {
+      setUpdatingRouteRuleId(null)
+    }
+  }
+
+  const handleDeleteRouteRule = async (rule: RouteRule) => {
+    if (!projectId) return
+    setUpdatingRouteRuleId(rule.id)
+    try {
+      await api.deleteRouteRule(projectId, rule.id)
+      setRouteRules(prev => prev.filter(item => item.id !== rule.id))
+      toast.success('Route rule deleted')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete route rule')
+    } finally {
+      setUpdatingRouteRuleId(null)
     }
   }
 
@@ -1177,6 +1318,14 @@ export default function ProjectSettings() {
       : []),
   ]
 
+  const filteredRouteRules = routeRules.filter(rule => {
+    if (routeSourceFilter !== 'all' && rule.source !== routeSourceFilter) return false
+    if (routeConfidenceFilter === 'high' && rule.confidence < 0.8) return false
+    if (routeConfidenceFilter === 'medium' && (rule.confidence < 0.5 || rule.confidence >= 0.8)) return false
+    if (routeConfidenceFilter === 'low' && rule.confidence >= 0.5) return false
+    return true
+  })
+
   if (loading) return (
     <div className="text-center py-12">
       <div className="inline-block h-6 w-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -1544,6 +1693,236 @@ export default function ProjectSettings() {
                       {savingIssues ? 'Saving...' : 'Save Stack Trace Rules'}
                     </Button>
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Route Grouping</CardTitle>
+                  <CardDescription>
+                    Normalize dynamic URLs into framework-aware route templates so `by_url` grouping uses stable endpoints instead of raw parameters.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="text-sm font-medium">Framework</label>
+                      <Select value={framework} onChange={e => setFramework(e.target.value)} className="mt-1 max-w-xs">
+                        <option value="generic">Generic</option>
+                        <option value="codeigniter">CodeIgniter</option>
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        The importer and future route parsers use this to choose the right routing rules.
+                      </p>
+                    </div>
+                    <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-muted/20 p-4">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">Use canonical routes for URL grouping</p>
+                        <p className="text-xs text-muted-foreground">
+                          When enabled, incoming URLs try to match imported route rules before building the `by_url` fingerprint.
+                        </p>
+                      </div>
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={routeGroupingEnabled}
+                          onChange={e => setRouteGroupingEnabled(e.target.checked)}
+                          className="h-4 w-4 rounded border-input bg-background"
+                        />
+                        Enabled
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-4 rounded-md border border-border/60 bg-muted/20 p-4">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Import framework routes</p>
+                      <p className="text-xs text-muted-foreground">
+                        Source code import reads explicit route files from the connected repository or an available local checkout. CodeIgniter convention fallback also works at runtime even without imported rules.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                      <div>
+                        <label className="text-sm font-medium">Import source</label>
+                        <Select value={routeImportSource} onChange={e => setRouteImportSource(e.target.value)} className="mt-1 max-w-xs">
+                          <option value="source_code">Source code</option>
+                          <option value="framework_convention">Framework conventions</option>
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!projectId || framework !== 'codeigniter' || importingRouteRules}
+                        onClick={handleImportRouteRules}
+                      >
+                        {importingRouteRules ? 'Importing...' : 'Import Rules'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 p-4 md:flex-row md:items-end md:justify-between">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="text-sm font-medium">Filter by source</label>
+                        <Select value={routeSourceFilter} onChange={e => setRouteSourceFilter(e.target.value)} className="mt-1 max-w-xs">
+                          <option value="all">All sources</option>
+                          <option value="manual">Manual</option>
+                          <option value="source_code">Source code</option>
+                          <option value="framework_convention">Framework convention</option>
+                          <option value="observed_issue">Observed issue</option>
+                          <option value="ai_suggestion">AI suggestion</option>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Filter by confidence</label>
+                        <Select value={routeConfidenceFilter} onChange={e => setRouteConfidenceFilter(e.target.value)} className="mt-1 max-w-xs">
+                          <option value="all">All confidence levels</option>
+                          <option value="high">High (≥ 0.8)</option>
+                          <option value="medium">Medium (0.5 - 0.79)</option>
+                          <option value="low">Low (&lt; 0.5)</option>
+                        </Select>
+                      </div>
+                    </div>
+                    <Button type="button" variant="outline" onClick={openCreateRouteRule}>
+                      Create Manual Rule
+                    </Button>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-md border border-border/60">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">On</th>
+                          <th className="px-3 py-2 font-medium">Method</th>
+                          <th className="px-3 py-2 font-medium">Template</th>
+                          <th className="px-3 py-2 font-medium">Target</th>
+                          <th className="px-3 py-2 font-medium">Source</th>
+                          <th className="px-3 py-2 font-medium">Confidence</th>
+                          <th className="px-3 py-2 font-medium">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredRouteRules.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                              No route rules imported yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredRouteRules.map(rule => (
+                            <tr key={rule.id} className="border-t border-border/50 align-top">
+                              <td className="px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  checked={rule.enabled}
+                                  disabled={updatingRouteRuleId === rule.id}
+                                  onChange={e => handleToggleRouteRule(rule, e.target.checked)}
+                                  className="mt-1 h-4 w-4 rounded border-input bg-background"
+                                />
+                              </td>
+                              <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{rule.method}</td>
+                              <td className="px-3 py-2">
+                                <div className="font-mono text-xs">{rule.canonical_path}</div>
+                                <div className="mt-1 font-mono text-[11px] text-muted-foreground">{rule.match_pattern}</div>
+                              </td>
+                              <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{rule.target || '—'}</td>
+                              <td className="px-3 py-2 text-xs text-muted-foreground">
+                                <div>{rule.source}</div>
+                                {rule.source_file && <div className="mt-1 font-mono text-[11px]">{rule.source_file}</div>}
+                              </td>
+                              <td className="px-3 py-2 text-xs text-muted-foreground">{rule.confidence.toFixed(2)}</td>
+                              <td className="px-3 py-2">
+                                <div className="flex gap-2">
+                                  <Button type="button" variant="outline" size="sm" onClick={() => openEditRouteRule(rule)}>
+                                    Edit
+                                  </Button>
+                                  <Button type="button" variant="outline" size="sm" onClick={() => handleDeleteRouteRule(rule)} disabled={updatingRouteRuleId === rule.id}>
+                                    Delete
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">Framework and route grouping are saved together with issue settings.</p>
+                    <Button onClick={handleSaveIssues} disabled={savingIssues}>
+                      {savingIssues ? 'Saving...' : 'Save Route Grouping Settings'}
+                    </Button>
+                  </div>
+
+                  <Dialog open={showRouteRuleForm} onOpenChange={open => { setShowRouteRuleForm(open); if (!open) resetRouteRuleForm() }}>
+                    <DialogContent>
+                      <DialogTitle>{editingRouteRule ? 'Edit Route Rule' : 'Create Route Rule'}</DialogTitle>
+                      <DialogDescription className="sr-only">Configure a route grouping rule</DialogDescription>
+                      <div className="mt-4 grid gap-4">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">Method</label>
+                            <Select value={routeRuleMethod} onChange={e => setRouteRuleMethod(e.target.value)} className="mt-1">
+                              <option value="*">Any</option>
+                              <option value="GET">GET</option>
+                              <option value="POST">POST</option>
+                              <option value="PUT">PUT</option>
+                              <option value="DELETE">DELETE</option>
+                              <option value="PATCH">PATCH</option>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Source</label>
+                            <Select value={routeRuleSource} onChange={e => setRouteRuleSource(e.target.value)} className="mt-1">
+                              <option value="manual">Manual</option>
+                              <option value="source_code">Source code</option>
+                              <option value="framework_convention">Framework convention</option>
+                              <option value="observed_issue">Observed issue</option>
+                              <option value="ai_suggestion">AI suggestion</option>
+                            </Select>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Match Pattern</label>
+                          <Input value={routeRuleMatchPattern} onChange={e => setRouteRuleMatchPattern(e.target.value)} className="mt-1" placeholder="coverApp/Reserv/getCalendar/(:num)/(:num)" />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Canonical Path</label>
+                          <Input value={routeRuleCanonicalPath} onChange={e => setRouteRuleCanonicalPath(e.target.value)} className="mt-1" placeholder="/coverApp/Reserv/getCalendar/:num/:num" />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Target</label>
+                          <Input value={routeRuleTarget} onChange={e => setRouteRuleTarget(e.target.value)} className="mt-1" placeholder="Reserv::getCalendar" />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Confidence</label>
+                          <Input value={routeRuleConfidence} onChange={e => setRouteRuleConfidence(e.target.value)} className="mt-1" placeholder="1.0" />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Notes</label>
+                          <Input value={routeRuleNotes} onChange={e => setRouteRuleNotes(e.target.value)} className="mt-1" placeholder="Optional note" />
+                        </div>
+                        <label className="inline-flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={routeRuleEnabled}
+                            onChange={e => setRouteRuleEnabled(e.target.checked)}
+                            className="h-4 w-4 rounded border-input bg-background"
+                          />
+                          Enabled
+                        </label>
+                        <div className="flex justify-end gap-2">
+                          <Button type="button" variant="outline" onClick={() => { setShowRouteRuleForm(false); resetRouteRuleForm() }}>
+                            Cancel
+                          </Button>
+                          <Button type="button" onClick={handleSaveRouteRule} disabled={!routeRuleMatchPattern || !routeRuleCanonicalPath || updatingRouteRuleId === 'new' || updatingRouteRuleId === editingRouteRule?.id}>
+                            {editingRouteRule ? 'Save Rule' : 'Create Rule'}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </CardContent>
               </Card>
 

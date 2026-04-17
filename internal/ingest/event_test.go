@@ -168,7 +168,7 @@ func TestResolveIssueGroupingByURLForErrorWithoutException(t *testing.T) {
 		},
 	}
 
-	fingerprint, title, culprit := resolveIssueGrouping(project, event)
+	fingerprint, title, culprit := resolveIssueGrouping(project, event, nil)
 
 	if fingerprint != hashFingerprintKey("info:url|GET|/coverApp/Reserv/getCalendar/:int/:year") {
 		t.Fatalf("unexpected fingerprint: %q", fingerprint)

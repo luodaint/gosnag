@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	basicAuthDSNPattern = regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`)
-	passwordPairPattern = regexp.MustCompile(`(?i)\b(password|pwd)\s*=\s*[^ \t\n\r;]+`)
+	basicAuthDSNPattern    = regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`)
+	passwordPairPattern    = regexp.MustCompile(`(?i)\b(password|pwd)\s*=\s*[^ \t\n\r;]+`)
 	mysqlCredentialPattern = regexp.MustCompile(`^([^:@/\s]+):([^@/\s]+)@`)
 )
 
@@ -90,19 +90,24 @@ func (h *Handler) TestDBAnalysisConnection(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	settings, err := loadProjectSettings(r.Context(), h.queries, project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project settings")
+		return
+	}
 
-	if !project.AnalysisDbEnabled {
+	if !settings.AnalysisDBEnabled {
 		writeError(w, http.StatusBadRequest, "database analysis is disabled for this project")
 		return
 	}
 
-	driver := normalizeAnalysisDriver(project.AnalysisDbDriver)
+	driver := normalizeAnalysisDriver(settings.AnalysisDBDriver)
 	if driver == "" {
 		writeError(w, http.StatusBadRequest, "unsupported analysis DB driver")
 		return
 	}
 
-	if strings.TrimSpace(project.AnalysisDbDsn) == "" {
+	if strings.TrimSpace(settings.AnalysisDBDSN) == "" {
 		writeError(w, http.StatusBadRequest, "database analysis DSN is not configured")
 		return
 	}
@@ -110,7 +115,7 @@ func (h *Handler) TestDBAnalysisConnection(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := testAnalysisConnection(ctx, driver, project.AnalysisDbDsn); err != nil {
+	if err := testAnalysisConnection(ctx, driver, settings.AnalysisDBDSN); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": sanitizeDBAnalysisError(err)})
 		return
 	}

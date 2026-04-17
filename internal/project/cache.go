@@ -122,6 +122,10 @@ func buildResult(ctx context.Context, queries *db.Queries) ([]ProjectListItem, e
 	if err != nil {
 		return nil, err
 	}
+	settingsMap, err := loadProjectSettingsMap(ctx, queries, projects)
+	if err != nil {
+		return nil, err
+	}
 
 	var (
 		wg          sync.WaitGroup
@@ -175,7 +179,7 @@ func buildResult(ctx context.Context, queries *db.Queries) ([]ProjectListItem, e
 
 	result := make([]ProjectListItem, len(projects))
 	for i, p := range projects {
-		sp := toSafeProject(p)
+		sp := toSafeProject(p, settingsMap[p.ID])
 		if p.GroupID.Valid {
 			sp.GroupName = groupMap[p.GroupID.UUID]
 		}

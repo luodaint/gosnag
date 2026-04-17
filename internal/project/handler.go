@@ -68,6 +68,8 @@ type CreateProjectRequest struct {
 	AnalysisDBName         *string          `json:"analysis_db_name,omitempty"`
 	AnalysisDBSchema       *string          `json:"analysis_db_schema,omitempty"`
 	AnalysisDBNotes        *string          `json:"analysis_db_notes,omitempty"`
+	Framework              *string          `json:"framework,omitempty"`
+	RouteGroupingEnabled   *bool            `json:"route_grouping_enabled,omitempty"`
 }
 
 type StacktraceRules struct {
@@ -126,6 +128,8 @@ type SafeProject struct {
 	AnalysisDBName         string          `json:"analysis_db_name"`
 	AnalysisDBSchema       string          `json:"analysis_db_schema"`
 	AnalysisDBNotes        string          `json:"analysis_db_notes"`
+	Framework              string          `json:"framework"`
+	RouteGroupingEnabled   bool            `json:"route_grouping_enabled"`
 	CreatedAt              time.Time       `json:"created_at"`
 	UpdatedAt              time.Time       `json:"updated_at"`
 }
@@ -221,54 +225,56 @@ func nullUUIDToStringPtr(u uuid.NullUUID) *string {
 	return &s
 }
 
-func toSafeProject(p db.Project) SafeProject {
+func toSafeProject(p db.Project, settings ProjectSettings) SafeProject {
 	return SafeProject{
 		ID:                     p.ID,
 		NumericID:              p.NumericID,
 		Name:                   p.Name,
 		Slug:                   p.Slug,
 		DefaultCooldownMinutes: p.DefaultCooldownMinutes,
-		WarningAsError:         p.WarningAsError,
-		MaxEventsPerIssue:      p.MaxEventsPerIssue,
-		MaxInfoIssues:          p.MaxInfoIssues,
+		WarningAsError:         settings.WarningAsError,
+		MaxEventsPerIssue:      settings.MaxEventsPerIssue,
+		MaxInfoIssues:          settings.MaxInfoIssues,
 		Icon:                   p.Icon,
 		Color:                  p.Color,
 		Position:               p.Position,
-		InfoGroupingMode:       normalizeInfoGroupingMode(p.InfoGroupingMode),
-		JiraBaseURL:            p.JiraBaseUrl,
-		JiraEmail:              p.JiraEmail,
-		JiraAPITokenSet:        p.JiraApiToken != "",
-		JiraProjectKey:         p.JiraProjectKey,
-		JiraIssueType:          p.JiraIssueType,
-		GithubTokenSet:         p.GithubToken != "",
-		GithubOwner:            p.GithubOwner,
-		GithubRepo:             p.GithubRepo,
-		GithubLabels:           p.GithubLabels,
+		InfoGroupingMode:       normalizeInfoGroupingMode(settings.InfoGroupingMode),
+		JiraBaseURL:            settings.JiraBaseURL,
+		JiraEmail:              settings.JiraEmail,
+		JiraAPITokenSet:        settings.JiraAPIToken != "",
+		JiraProjectKey:         settings.JiraProjectKey,
+		JiraIssueType:          settings.JiraIssueType,
+		GithubTokenSet:         settings.GithubToken != "",
+		GithubOwner:            settings.GithubOwner,
+		GithubRepo:             settings.GithubRepo,
+		GithubLabels:           settings.GithubLabels,
 		WorkflowMode:           p.WorkflowMode,
-		RepoProvider:           p.RepoProvider,
-		RepoOwner:              p.RepoOwner,
-		RepoName:               p.RepoName,
-		RepoDefaultBranch:      p.RepoDefaultBranch,
-		RepoTokenSet:           p.RepoToken != "",
-		RepoPathStrip:          p.RepoPathStrip,
-		IssueDisplayMode:       p.IssueDisplayMode,
+		RepoProvider:           settings.RepoProvider,
+		RepoOwner:              settings.RepoOwner,
+		RepoName:               settings.RepoName,
+		RepoDefaultBranch:      settings.RepoDefaultBranch,
+		RepoTokenSet:           settings.RepoToken != "",
+		RepoPathStrip:          settings.RepoPathStrip,
+		IssueDisplayMode:       settings.IssueDisplayMode,
 		GroupID:                nullUUIDToStringPtr(p.GroupID),
-		AIEnabled:              p.AiEnabled,
-		AIModel:                p.AiModel,
-		AIMergeSuggestions:     p.AiMergeSuggestions,
-		AIAutoMerge:            p.AiAutoMerge,
-		AIAnomalyDetection:     p.AiAnomalyDetection,
-		AITicketDescription:    p.AiTicketDescription,
-		AIRootCause:            p.AiRootCause,
-		AITriage:               p.AiTriage,
-		StacktraceRules:        parseStacktraceRules(p.StacktraceRules),
-		AnalysisDBEnabled:      p.AnalysisDbEnabled,
-		AnalysisDBConfigured:   strings.TrimSpace(p.AnalysisDbDsn) != "",
-		AnalysisDBDriver:       p.AnalysisDbDriver,
-		AnalysisDBDSNDisplay:   maskedAnalysisDSN(p.AnalysisDbDsn),
-		AnalysisDBName:         p.AnalysisDbName,
-		AnalysisDBSchema:       p.AnalysisDbSchema,
-		AnalysisDBNotes:        p.AnalysisDbNotes,
+		AIEnabled:              settings.AIEnabled,
+		AIModel:                settings.AIModel,
+		AIMergeSuggestions:     settings.AIMergeSuggestions,
+		AIAutoMerge:            settings.AIAutoMerge,
+		AIAnomalyDetection:     settings.AIAnomalyDetection,
+		AITicketDescription:    settings.AITicketDescription,
+		AIRootCause:            settings.AIRootCause,
+		AITriage:               settings.AITriage,
+		StacktraceRules:        parseStacktraceRules(settings.StacktraceRules),
+		AnalysisDBEnabled:      settings.AnalysisDBEnabled,
+		AnalysisDBConfigured:   strings.TrimSpace(settings.AnalysisDBDSN) != "",
+		AnalysisDBDriver:       settings.AnalysisDBDriver,
+		AnalysisDBDSNDisplay:   maskedAnalysisDSN(settings.AnalysisDBDSN),
+		AnalysisDBName:         settings.AnalysisDBName,
+		AnalysisDBSchema:       settings.AnalysisDBSchema,
+		AnalysisDBNotes:        settings.AnalysisDBNotes,
+		Framework:              settings.Framework,
+		RouteGroupingEnabled:   settings.RouteGroupingEnabled,
 		CreatedAt:              p.CreatedAt,
 		UpdatedAt:              p.UpdatedAt,
 	}
@@ -336,7 +342,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	h.cache.InvalidateSync(r.Context())
 	dsn := buildDSN(r, key.PublicKey, project.NumericID)
 	legacyDSN := buildLegacyDSN(r, key.PublicKey, project.ID)
-	writeJSON(w, http.StatusCreated, ProjectResponse{SafeProject: toSafeProject(project), DSN: dsn, LegacyDSN: legacyDSN})
+	settings, err := loadProjectSettings(r.Context(), h.queries, project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project settings")
+		return
+	}
+	writeJSON(w, http.StatusCreated, ProjectResponse{SafeProject: toSafeProject(project, settings), DSN: dsn, LegacyDSN: legacyDSN})
 }
 
 type ProjectListItem struct {
@@ -389,7 +400,12 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		legacyDSN = buildLegacyDSN(r, keys[0].PublicKey, project.ID)
 	}
 
-	sp := toSafeProject(project)
+	settings, err := loadProjectSettings(r.Context(), h.queries, project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project settings")
+		return
+	}
+	sp := toSafeProject(project, settings)
 	if project.GroupID.Valid {
 		if groups, err := h.queries.ListProjectGroups(r.Context()); err == nil {
 			for _, g := range groups {
@@ -427,6 +443,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existingSettings, err := loadProjectSettings(r.Context(), h.queries, existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get project settings")
+		return
+	}
+
 	// Preserve existing values when not provided
 	name := req.Name
 	if name == "" {
@@ -442,53 +464,53 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		cooldown = *req.DefaultCooldownMinutes
 	}
 
-	warningAsError := existing.WarningAsError
+	warningAsError := existingSettings.WarningAsError
 	if req.WarningAsError != nil {
 		warningAsError = *req.WarningAsError
 	}
 
 	jiraBaseURL := req.JiraBaseURL
 	if jiraBaseURL == "" {
-		jiraBaseURL = existing.JiraBaseUrl
+		jiraBaseURL = existingSettings.JiraBaseURL
 	}
 	jiraEmail := req.JiraEmail
 	if jiraEmail == "" {
-		jiraEmail = existing.JiraEmail
+		jiraEmail = existingSettings.JiraEmail
 	}
 	jiraProjectKey := req.JiraProjectKey
 	if jiraProjectKey == "" {
-		jiraProjectKey = existing.JiraProjectKey
+		jiraProjectKey = existingSettings.JiraProjectKey
 	}
 	jiraIssueType := req.JiraIssueType
 	if jiraIssueType == "" {
-		jiraIssueType = existing.JiraIssueType
+		jiraIssueType = existingSettings.JiraIssueType
 	}
 	if jiraIssueType == "" {
 		jiraIssueType = "Bug"
 	}
 	jiraApiToken := req.JiraAPIToken
 	if jiraApiToken == "" {
-		jiraApiToken = existing.JiraApiToken
+		jiraApiToken = existingSettings.JiraAPIToken
 	}
 
 	githubOwner := req.GithubOwner
 	if githubOwner == "" {
-		githubOwner = existing.GithubOwner
+		githubOwner = existingSettings.GithubOwner
 	}
 	githubRepo := req.GithubRepo
 	if githubRepo == "" {
-		githubRepo = existing.GithubRepo
+		githubRepo = existingSettings.GithubRepo
 	}
 	githubLabels := req.GithubLabels
 	if githubLabels == "" {
-		githubLabels = existing.GithubLabels
+		githubLabels = existingSettings.GithubLabels
 	}
 	if githubLabels == "" {
 		githubLabels = "bug"
 	}
 	githubToken := req.GithubToken
 	if githubToken == "" {
-		githubToken = existing.GithubToken
+		githubToken = existingSettings.GithubToken
 	}
 
 	workflowMode := req.WorkflowMode
@@ -501,38 +523,38 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	repoProvider := req.RepoProvider
 	if repoProvider == "" {
-		repoProvider = existing.RepoProvider
+		repoProvider = existingSettings.RepoProvider
 	}
 	repoOwner := req.RepoOwner
 	if repoOwner == "" {
-		repoOwner = existing.RepoOwner
+		repoOwner = existingSettings.RepoOwner
 	}
 	repoName := req.RepoName
 	if repoName == "" {
-		repoName = existing.RepoName
+		repoName = existingSettings.RepoName
 	}
 	repoDefaultBranch := req.RepoDefaultBranch
 	if repoDefaultBranch == "" {
-		repoDefaultBranch = existing.RepoDefaultBranch
+		repoDefaultBranch = existingSettings.RepoDefaultBranch
 	}
 	if repoDefaultBranch == "" {
 		repoDefaultBranch = "main"
 	}
 	repoToken := req.RepoToken
 	if repoToken == "" {
-		repoToken = existing.RepoToken
+		repoToken = existingSettings.RepoToken
 	}
 	repoPathStrip := req.RepoPathStrip
 	if repoPathStrip == "" {
-		repoPathStrip = existing.RepoPathStrip
+		repoPathStrip = existingSettings.RepoPathStrip
 	}
 
-	maxEvents := existing.MaxEventsPerIssue
+	maxEvents := existingSettings.MaxEventsPerIssue
 	if req.MaxEventsPerIssue != nil {
 		maxEvents = *req.MaxEventsPerIssue
 	}
 
-	maxInfoIssues := existing.MaxInfoIssues
+	maxInfoIssues := existingSettings.MaxInfoIssues
 	if req.MaxInfoIssues != nil {
 		if *req.MaxInfoIssues < 0 {
 			writeError(w, http.StatusBadRequest, "max_info_issues must be >= 0")
@@ -550,50 +572,50 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		color = *req.Color
 	}
 
-	issueDisplayMode := existing.IssueDisplayMode
+	issueDisplayMode := existingSettings.IssueDisplayMode
 	if req.IssueDisplayMode != "" {
 		issueDisplayMode = req.IssueDisplayMode
 	}
 
-	infoGroupingMode := normalizeInfoGroupingMode(existing.InfoGroupingMode)
+	infoGroupingMode := normalizeInfoGroupingMode(existingSettings.InfoGroupingMode)
 	if req.InfoGroupingMode != "" {
 		infoGroupingMode = normalizeInfoGroupingMode(req.InfoGroupingMode)
 	}
 
-	aiEnabled := existing.AiEnabled
+	aiEnabled := existingSettings.AIEnabled
 	if req.AIEnabled != nil {
 		aiEnabled = *req.AIEnabled
 	}
 	aiModel := req.AIModel
 	if aiModel == "" {
-		aiModel = existing.AiModel
+		aiModel = existingSettings.AIModel
 	}
-	aiMergeSuggestions := existing.AiMergeSuggestions
+	aiMergeSuggestions := existingSettings.AIMergeSuggestions
 	if req.AIMergeSuggestions != nil {
 		aiMergeSuggestions = *req.AIMergeSuggestions
 	}
-	aiAutoMerge := existing.AiAutoMerge
+	aiAutoMerge := existingSettings.AIAutoMerge
 	if req.AIAutoMerge != nil {
 		aiAutoMerge = *req.AIAutoMerge
 	}
-	aiAnomalyDetection := existing.AiAnomalyDetection
+	aiAnomalyDetection := existingSettings.AIAnomalyDetection
 	if req.AIAnomalyDetection != nil {
 		aiAnomalyDetection = *req.AIAnomalyDetection
 	}
-	aiTicketDescription := existing.AiTicketDescription
+	aiTicketDescription := existingSettings.AITicketDescription
 	if req.AITicketDescription != nil {
 		aiTicketDescription = *req.AITicketDescription
 	}
-	aiRootCause := existing.AiRootCause
+	aiRootCause := existingSettings.AIRootCause
 	if req.AIRootCause != nil {
 		aiRootCause = *req.AIRootCause
 	}
-	aiTriage := existing.AiTriage
+	aiTriage := existingSettings.AITriage
 	if req.AITriage != nil {
 		aiTriage = *req.AITriage
 	}
 
-	stacktraceRules := parseStacktraceRules(existing.StacktraceRules)
+	stacktraceRules := parseStacktraceRules(existingSettings.StacktraceRules)
 	if req.StacktraceRules != nil {
 		stacktraceRules = normalizeStacktraceRules(*req.StacktraceRules)
 		if err := validateStacktraceRules(stacktraceRules); err != nil {
@@ -602,32 +624,59 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	analysisDBEnabled := existing.AnalysisDbEnabled
+	analysisDBEnabled := existingSettings.AnalysisDBEnabled
 	if req.AnalysisDBEnabled != nil {
 		analysisDBEnabled = *req.AnalysisDBEnabled
 	}
-	analysisDBDriver := existing.AnalysisDbDriver
+	analysisDBDriver := existingSettings.AnalysisDBDriver
 	if req.AnalysisDBDriver != nil {
 		analysisDBDriver = strings.TrimSpace(*req.AnalysisDBDriver)
 	}
-	analysisDBDSN := existing.AnalysisDbDsn
+	analysisDBDSN := existingSettings.AnalysisDBDSN
 	if req.AnalysisDBDSN != nil {
 		analysisDBDSN = strings.TrimSpace(*req.AnalysisDBDSN)
 	}
-	analysisDBName := existing.AnalysisDbName
+	analysisDBName := existingSettings.AnalysisDBName
 	if req.AnalysisDBName != nil {
 		analysisDBName = strings.TrimSpace(*req.AnalysisDBName)
 	}
-	analysisDBSchema := existing.AnalysisDbSchema
+	analysisDBSchema := existingSettings.AnalysisDBSchema
 	if req.AnalysisDBSchema != nil {
 		analysisDBSchema = strings.TrimSpace(*req.AnalysisDBSchema)
 	}
-	analysisDBNotes := existing.AnalysisDbNotes
+	analysisDBNotes := existingSettings.AnalysisDBNotes
 	if req.AnalysisDBNotes != nil {
 		analysisDBNotes = strings.TrimSpace(*req.AnalysisDBNotes)
 	}
 
-	project, err := h.queries.UpdateProject(r.Context(), db.UpdateProjectParams{
+	framework := existingSettings.Framework
+	if req.Framework != nil {
+		framework = strings.TrimSpace(*req.Framework)
+	}
+	if framework == "" {
+		framework = "generic"
+	}
+
+	routeGroupingEnabled := existingSettings.RouteGroupingEnabled
+	if req.RouteGroupingEnabled != nil {
+		routeGroupingEnabled = *req.RouteGroupingEnabled
+	}
+
+	rawdb, ok := h.queries.RawDB().(*sql.DB)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "project store is not transaction-capable")
+		return
+	}
+	tx, err := rawdb.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start project update")
+		return
+	}
+	defer tx.Rollback()
+
+	txQueries := h.queries.WithTx(tx)
+
+	project, err := txQueries.UpdateProject(r.Context(), db.UpdateProjectParams{
 		ID:                     id,
 		Name:                   name,
 		Slug:                   slug,
@@ -680,6 +729,49 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := saveProjectSettings(r.Context(), txQueries, id, ProjectSettings{
+		WarningAsError:       warningAsError,
+		MaxEventsPerIssue:    maxEvents,
+		IssueDisplayMode:     issueDisplayMode,
+		InfoGroupingMode:     infoGroupingMode,
+		MaxInfoIssues:        maxInfoIssues,
+		JiraBaseURL:          jiraBaseURL,
+		JiraEmail:            jiraEmail,
+		JiraAPIToken:         jiraApiToken,
+		JiraProjectKey:       jiraProjectKey,
+		JiraIssueType:        jiraIssueType,
+		GithubToken:          githubToken,
+		GithubOwner:          githubOwner,
+		GithubRepo:           githubRepo,
+		GithubLabels:         githubLabels,
+		RepoProvider:         repoProvider,
+		RepoOwner:            repoOwner,
+		RepoName:             repoName,
+		RepoDefaultBranch:    repoDefaultBranch,
+		RepoToken:            repoToken,
+		RepoPathStrip:        repoPathStrip,
+		AIEnabled:            aiEnabled,
+		AIModel:              aiModel,
+		AIMergeSuggestions:   aiMergeSuggestions,
+		AIAutoMerge:          aiAutoMerge,
+		AIAnomalyDetection:   aiAnomalyDetection,
+		AITicketDescription:  aiTicketDescription,
+		AIRootCause:          aiRootCause,
+		AITriage:             aiTriage,
+		StacktraceRules:      marshalStacktraceRules(stacktraceRules),
+		AnalysisDBEnabled:    analysisDBEnabled,
+		AnalysisDBDriver:     analysisDBDriver,
+		AnalysisDBDSN:        analysisDBDSN,
+		AnalysisDBName:       analysisDBName,
+		AnalysisDBSchema:     analysisDBSchema,
+		AnalysisDBNotes:      analysisDBNotes,
+		Framework:            framework,
+		RouteGroupingEnabled: routeGroupingEnabled,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update project settings")
+		return
+	}
+
 	// Update group assignment if provided
 	if req.GroupID != nil {
 		var groupID uuid.NullUUID
@@ -691,15 +783,61 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 			groupID = uuid.NullUUID{UUID: parsed, Valid: true}
 		}
-		_ = h.queries.SetProjectGroup(r.Context(), db.SetProjectGroupParams{
+		if err := txQueries.SetProjectGroup(r.Context(), db.SetProjectGroupParams{
 			ID:      id,
 			GroupID: groupID,
-		})
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update project group")
+			return
+		}
 		project.GroupID = groupID
 	}
 
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit project update")
+		return
+	}
+
 	h.cache.InvalidateSync(r.Context())
-	writeJSON(w, http.StatusOK, toSafeProject(project))
+	writeJSON(w, http.StatusOK, toSafeProject(project, ProjectSettings{
+		WarningAsError:       warningAsError,
+		MaxEventsPerIssue:    maxEvents,
+		IssueDisplayMode:     issueDisplayMode,
+		InfoGroupingMode:     infoGroupingMode,
+		MaxInfoIssues:        maxInfoIssues,
+		JiraBaseURL:          jiraBaseURL,
+		JiraEmail:            jiraEmail,
+		JiraAPIToken:         jiraApiToken,
+		JiraProjectKey:       jiraProjectKey,
+		JiraIssueType:        jiraIssueType,
+		GithubToken:          githubToken,
+		GithubOwner:          githubOwner,
+		GithubRepo:           githubRepo,
+		GithubLabels:         githubLabels,
+		RepoProvider:         repoProvider,
+		RepoOwner:            repoOwner,
+		RepoName:             repoName,
+		RepoDefaultBranch:    repoDefaultBranch,
+		RepoToken:            repoToken,
+		RepoPathStrip:        repoPathStrip,
+		AIEnabled:            aiEnabled,
+		AIModel:              aiModel,
+		AIMergeSuggestions:   aiMergeSuggestions,
+		AIAutoMerge:          aiAutoMerge,
+		AIAnomalyDetection:   aiAnomalyDetection,
+		AITicketDescription:  aiTicketDescription,
+		AIRootCause:          aiRootCause,
+		AITriage:             aiTriage,
+		StacktraceRules:      marshalStacktraceRules(stacktraceRules),
+		AnalysisDBEnabled:    analysisDBEnabled,
+		AnalysisDBDriver:     analysisDBDriver,
+		AnalysisDBDSN:        analysisDBDSN,
+		AnalysisDBName:       analysisDBName,
+		AnalysisDBSchema:     analysisDBSchema,
+		AnalysisDBNotes:      analysisDBNotes,
+		Framework:            framework,
+		RouteGroupingEnabled: routeGroupingEnabled,
+	}))
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {

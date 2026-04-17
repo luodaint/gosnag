@@ -22,5 +22,8 @@ Nothing currently in progress.
 | Epic | Description | Doc | Priority |
 |------|-------------|-----|----------|
 | **DataCheck** | Proactive database integrity monitoring. Define SQL queries with cron schedules against external databases — GoSnag creates issues when assertions fail. Supports expect_empty, expect_rows, and row_count threshold modes. Integrates with existing alert pipeline. | [datacheck-epic.md](epics/datacheck-epic.md) | High |
+| **Query Views / Reports** | Read-only query experience over controlled PostgreSQL views so users can build saved reports, inspect trends, and answer operational questions without leaving GoSnag. Inspired by tools like New Relic query consoles, but limited to whitelisted analytical views. | [query-views-requirements.md](query-views-requirements.md) | High |
+| **Custom Ticket Workflows** | Per-project ticket workflows with customizable states, transitions, and sidebar counters so teams can model their own operational process instead of using a fixed status set. | TBD | High |
+| **Ticket Provider Integrations** | Create and sync tickets with external providers such as GitHub and Bitbucket, so GoSnag tickets can be escalated or mirrored into engineering work trackers when needed. | TBD | High |
 | **Multi-Tenant Organizations** | Organization-level tenant boundary with per-org roles and project isolation. Enables SaaS model or team separation within a single GoSnag instance. | [multitenancy-epic.md](multitenancy-epic.md) | High |
 | **Local Edge Relay Agent** | Lightweight Go binary running on app servers as a local Sentry-compatible relay. Sub-millisecond latency, local buffering, async forwarding. No filtering — intelligence stays server-side. | [gosnag-agent-epic.md](gosnag-agent-epic.md) | Medium |

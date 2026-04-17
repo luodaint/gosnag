@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/darkspock/gosnag/internal/activity"
 	"github.com/darkspock/gosnag/internal/database/db"
+	"github.com/darkspock/gosnag/internal/routegroup"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -156,13 +158,54 @@ func isInformationalLevel(level string) bool {
 	return level == "info" || level == "debug"
 }
 
-func resolveIssueGrouping(project db.Project, event *SentryEvent) (string, string, string) {
+func canonicalURLGroupingHint(event *SentryEvent, project db.Project, queries *db.Queries) (groupingHint, bool) {
+	hint, ok := event.URLGroupingHint()
+	if !ok || project.InfoGroupingMode != "by_url" || queries == nil {
+		return hint, ok
+	}
+
+	method, currentPath := event.requestMethodAndPath()
+	if currentPath == "" {
+		return hint, ok
+	}
+	rule, matched, err := routegroup.FindCanonicalRoute(context.Background(), queries, project.ID, method, currentPath)
+	if err != nil || !matched || rule.CanonicalPath == "" || rule.CanonicalPath == currentPath {
+		return hint, ok
+	}
+	canonicalPath := rule.CanonicalPath
+
+	culprit := canonicalPath
+	fingerprintKey := "info:url|" + canonicalPath
+	if method != "" {
+		culprit = method + " " + canonicalPath
+		fingerprintKey = "info:url|" + method + "|" + canonicalPath
+	}
+
+	slog.Debug("route grouping matched",
+		"project_id", project.ID,
+		"method", method,
+		"raw_url", currentPath,
+		"normalized_url", canonicalPath,
+		"rule_id", rule.ID,
+		"rule_source", rule.Source,
+		"confidence", rule.Confidence,
+		"culprit", culprit,
+	)
+
+	return groupingHint{
+		FingerprintKey: fingerprintKey,
+		Title:          event.groupingTitleFromKey(culprit),
+		Culprit:        culprit,
+	}, true
+}
+
+func resolveIssueGrouping(project db.Project, event *SentryEvent, queries *db.Queries) (string, string, string) {
 	fingerprint := event.ComputeFingerprint()
 	title := event.IssueTitle()
 	culprit := event.Culprit()
 
 	if project.InfoGroupingMode == "by_url" && !event.HasExceptionStacktrace() {
-		if hint, ok := event.URLGroupingHint(); ok {
+		if hint, ok := canonicalURLGroupingHint(event, project, queries); ok {
 			return hashFingerprintKey(hint.FingerprintKey), title, hint.Culprit
 		}
 	}
@@ -173,7 +216,7 @@ func resolveIssueGrouping(project db.Project, event *SentryEvent) (string, strin
 
 	switch project.InfoGroupingMode {
 	case "by_url":
-		if hint, ok := event.URLGroupingHint(); ok {
+		if hint, ok := canonicalURLGroupingHint(event, project, queries); ok {
 			return hashFingerprintKey(hint.FingerprintKey), hint.Title, hint.Culprit
 		}
 	case "by_file":
@@ -188,7 +231,7 @@ func resolveIssueGrouping(project db.Project, event *SentryEvent) (string, strin
 func (h *Handler) processEvent(r *http.Request, project db.Project, event *SentryEvent) {
 	ctx := r.Context()
 	projectID := project.ID
-	fingerprint, issueTitle, culprit := resolveIssueGrouping(project, event)
+	fingerprint, issueTitle, culprit := resolveIssueGrouping(project, event, h.queries)
 	now := time.Now()
 	issueLevel := normalizeIssueLevel(event.Level, project.WarningAsError)
 

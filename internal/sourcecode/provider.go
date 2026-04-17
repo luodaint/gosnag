@@ -13,6 +13,9 @@ type Provider interface {
 	// FileURL returns a direct link to a file and line in the repository.
 	FileURL(path string, line int, commitOrBranch string) string
 
+	// GetFile returns raw file contents for a repository path at a given ref.
+	GetFile(ctx context.Context, path string, ref string) ([]byte, error)
+
 	// GetCommitsForFiles returns recent commits that touched any of the given files.
 	GetCommitsForFiles(ctx context.Context, files []string, since time.Time) ([]Commit, error)
 
@@ -70,6 +73,15 @@ func NewProvider(cfg Config) Provider {
 	default:
 		return nil
 	}
+}
+
+// NewImportProvider returns the best available provider for static source imports.
+// It prefers configured remote providers and falls back to a local checkout when present.
+func NewImportProvider(cfg Config) Provider {
+	if provider := NewProvider(cfg); provider != nil && cfg.IsConfigured() {
+		return provider
+	}
+	return NewLocalProvider(cfg)
 }
 
 // StripPath removes the configured prefix from a runtime file path.

@@ -20,6 +20,7 @@ import (
 	"github.com/darkspock/gosnag/internal/comment"
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
+	"github.com/darkspock/gosnag/internal/dbqueryanalysis"
 	"github.com/darkspock/gosnag/internal/github"
 	"github.com/darkspock/gosnag/internal/ingest"
 	"github.com/darkspock/gosnag/internal/issue"
@@ -27,6 +28,7 @@ import (
 	"github.com/darkspock/gosnag/internal/n1"
 	"github.com/darkspock/gosnag/internal/priority"
 	"github.com/darkspock/gosnag/internal/project"
+	"github.com/darkspock/gosnag/internal/routegroup"
 	"github.com/darkspock/gosnag/internal/sourcecode"
 	"github.com/darkspock/gosnag/internal/tags"
 	"github.com/darkspock/gosnag/internal/ticket"
@@ -75,6 +77,8 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 
 	statsCache := project.NewStatsCache(queries, 10*time.Second)
 	projectHandler := project.NewHandler(queries, statsCache)
+	routeGroupHandler := routegroup.NewHandler(queries)
+	dbQueryAnalysisHandler := dbqueryanalysis.NewHandler(queries)
 	issueHandler := issue.NewHandler(queries, database)
 	userHandler := user.NewHandler(queries)
 	jiraHandler := jira.NewHandler(queries, cfg)
@@ -196,6 +200,13 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.With(auth.RequireAdmin).Put("/", projectHandler.Update)
 				r.With(auth.RequireAdmin).Delete("/", projectHandler.Delete)
 				r.With(auth.RequireAdmin).Post("/db-analysis/test", projectHandler.TestDBAnalysisConnection)
+				r.Route("/route-rules", func(r chi.Router) {
+					r.Get("/", routeGroupHandler.List)
+					r.With(auth.RequireAdmin).Post("/", routeGroupHandler.Create)
+					r.With(auth.RequireAdmin).Post("/import", routeGroupHandler.Import)
+					r.With(auth.RequireAdmin).Put("/{rule_id}", routeGroupHandler.Update)
+					r.With(auth.RequireAdmin).Delete("/{rule_id}", routeGroupHandler.Delete)
+				})
 
 				// API Tokens per project
 				r.Route("/tokens", func(r chi.Router) {
@@ -279,6 +290,8 @@ func setupRouter(database *sql.DB, cfg *config.Config) http.Handler {
 				r.With(auth.RequireWritePermission).Put("/", issueHandler.UpdateStatus)
 				r.With(auth.RequireWritePermission).Put("/assign", issueHandler.Assign)
 				r.Get("/events", issueHandler.ListEvents)
+				r.With(auth.RequireAdmin).Post("/db-analysis", dbQueryAnalysisHandler.AnalyzeIssueQueries)
+				r.With(auth.RequireAdmin).Post("/db-analysis/explain", dbQueryAnalysisHandler.ExplainIssueQuery)
 				r.Get("/tags", tagsHandler.ListIssueTags)
 				r.With(auth.RequireWritePermission).Post("/tags", tagsHandler.AddTag)
 				r.With(auth.RequireWritePermission).Delete("/tags", tagsHandler.RemoveTag)
