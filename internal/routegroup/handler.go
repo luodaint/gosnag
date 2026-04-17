@@ -177,9 +177,13 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Source string `json:"source"`
+		Source    string `json:"source"`
+		Framework string `json:"framework"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+	if selected := normalizeFramework(req.Framework); selected != "" && selected != "generic" {
+		framework = selected
+	}
 	source := strings.TrimSpace(req.Source)
 	if source == "" {
 		source = "source_code"
@@ -215,7 +219,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 				CanonicalPath: "/:any/:any",
 				Target:        "controller::method",
 				Source:        "framework_convention",
-				Confidence:    0.6,
+				Confidence:    0.9,
 				Enabled:       true,
 				Framework:     "codeigniter",
 				Notes:         "Generic CodeIgniter controller/method fallback",
@@ -226,7 +230,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 				CanonicalPath: "/:any/:any/:any",
 				Target:        "controller::method",
 				Source:        "framework_convention",
-				Confidence:    0.5,
+				Confidence:    0.8,
 				Enabled:       true,
 				Framework:     "codeigniter",
 				Notes:         "Generic CodeIgniter route with one parameter",
@@ -237,7 +241,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 				CanonicalPath: "/:any/:any/:any/:any",
 				Target:        "controller::method",
 				Source:        "framework_convention",
-				Confidence:    0.4,
+				Confidence:    0.7,
 				Enabled:       true,
 				Framework:     "codeigniter",
 				Notes:         "Generic CodeIgniter route with two parameters",
@@ -248,7 +252,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 				CanonicalPath: "/:any/:any/:any/:any/:any",
 				Target:        "controller::method",
 				Source:        "framework_convention",
-				Confidence:    0.3,
+				Confidence:    0.6,
 				Enabled:       true,
 				Framework:     "codeigniter",
 				Notes:         "Generic CodeIgniter route with three parameters",

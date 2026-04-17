@@ -169,6 +169,14 @@ export default function ProjectSettings() {
   const [analysisDbName, setAnalysisDbName] = useState('')
   const [analysisDbSchema, setAnalysisDbSchema] = useState('')
   const [analysisDbNotes, setAnalysisDbNotes] = useState('')
+  const [showAnalysisDbGenerator, setShowAnalysisDbGenerator] = useState(false)
+  const [analysisDbGeneratorDriver, setAnalysisDbGeneratorDriver] = useState('')
+  const [analysisDbGeneratorHost, setAnalysisDbGeneratorHost] = useState('')
+  const [analysisDbGeneratorPort, setAnalysisDbGeneratorPort] = useState('')
+  const [analysisDbGeneratorUser, setAnalysisDbGeneratorUser] = useState('')
+  const [analysisDbGeneratorPassword, setAnalysisDbGeneratorPassword] = useState('')
+  const [analysisDbGeneratorDatabase, setAnalysisDbGeneratorDatabase] = useState('')
+  const [analysisDbGeneratorParams, setAnalysisDbGeneratorParams] = useState('')
   const [savingAnalysisDb, setSavingAnalysisDb] = useState(false)
   const [testingAnalysisDb, setTestingAnalysisDb] = useState(false)
   const [framework, setFramework] = useState('generic')
@@ -280,6 +288,7 @@ export default function ProjectSettings() {
     slug,
     workflow_mode: workflowMode,
     group_id: selectedGroupId || null,
+    framework,
   })
 
   const buildIssuesPayload = () => ({
@@ -289,7 +298,6 @@ export default function ProjectSettings() {
     max_info_issues: parseInt(maxInfoIssues) || 0,
     issue_display_mode: issueDisplayMode,
     info_grouping_mode: infoGroupingMode,
-    framework,
     route_grouping_enabled: routeGroupingEnabled,
     stacktrace_rules: stacktraceRules,
   })
@@ -335,6 +343,66 @@ export default function ProjectSettings() {
     analysis_db_schema: analysisDbSchema,
     analysis_db_notes: analysisDbNotes,
   })
+
+  const defaultAnalysisDbPort = (driver: string) => {
+    if (driver === 'mysql') return '3306'
+    return '5432'
+  }
+
+  const openAnalysisDbGenerator = () => {
+    const nextDriver = analysisDbDriver || 'postgres'
+    setAnalysisDbGeneratorDriver(nextDriver)
+    setAnalysisDbGeneratorPort(defaultAnalysisDbPort(nextDriver))
+    setAnalysisDbGeneratorHost('')
+    setAnalysisDbGeneratorUser('')
+    setAnalysisDbGeneratorPassword('')
+    setAnalysisDbGeneratorDatabase('')
+    setAnalysisDbGeneratorParams(nextDriver === 'mysql' ? 'parseTime=true' : 'sslmode=disable')
+    setShowAnalysisDbGenerator(true)
+  }
+
+  const buildGeneratedAnalysisDbDsn = () => {
+    const driver = analysisDbGeneratorDriver || 'postgres'
+    const host = analysisDbGeneratorHost.trim()
+    const port = analysisDbGeneratorPort.trim() || defaultAnalysisDbPort(driver)
+    const user = encodeURIComponent(analysisDbGeneratorUser.trim())
+    const password = encodeURIComponent(analysisDbGeneratorPassword)
+    const database = encodeURIComponent(analysisDbGeneratorDatabase.trim())
+    const params = analysisDbGeneratorParams.trim()
+
+    if (!host || !database) return ''
+
+    if (driver === 'mysql') {
+      const auth = analysisDbGeneratorUser.trim()
+        ? `${user}:${password}@`
+        : ''
+      const query = params ? `?${params}` : ''
+      return `${auth}tcp(${host}:${port})/${database}${query}`
+    }
+
+    const auth = analysisDbGeneratorUser.trim()
+      ? `${user}:${password}@`
+      : ''
+    const query = params ? `?${params}` : ''
+    return `postgres://${auth}${host}:${port}/${database}${query}`
+  }
+
+  const canUseGeneratedAnalysisDbDsn = Boolean(
+    analysisDbGeneratorHost.trim() &&
+    analysisDbGeneratorDatabase.trim(),
+  )
+
+  const handleUseGeneratedAnalysisDbDsn = () => {
+    const dsn = buildGeneratedAnalysisDbDsn()
+    if (!dsn) {
+      toast.error('Fill at least host and database to generate the connection string')
+      return
+    }
+    setAnalysisDbDriver(analysisDbGeneratorDriver || 'postgres')
+    setAnalysisDbDsn(dsn)
+    setShowAnalysisDbGenerator(false)
+    toast.success('Connection string generated')
+  }
 
   const buildRouteRulePayload = (): RouteRuleInput => ({
     method: routeRuleMethod,
@@ -406,7 +474,7 @@ export default function ProjectSettings() {
       api.listGroups().then(setAllGroups),
       api.listPriorityRules(projectId).then(setPriorityRules),
       api.listTagRules(projectId).then(setTagRules),
-      api.listRouteRules(projectId).then(setRouteRules),
+      api.listRouteRules(projectId).then(items => setRouteRules(Array.isArray(items) ? items : [])),
       api.getAIStatus(projectId).then(s => { setAiProviderConfigured(s.provider_configured); setAiProviderName(s.provider) }).catch(() => {}),
       api.getAIUsage(projectId).then(setAiUsage).catch(() => {}),
     ]).finally(() => setLoading(false))
@@ -464,11 +532,14 @@ export default function ProjectSettings() {
 
   const handleImportRouteRules = async () => {
     if (!projectId) return
+    if (framework === 'generic') {
+      toast.error('Select a project framework in General settings before importing route rules')
+      return
+    }
     setImportingRouteRules(true)
     try {
-      const result = await api.importRouteRules(projectId, { source: routeImportSource })
+      const result = await api.importRouteRules(projectId, { source: routeImportSource, framework })
       setRouteRules(result.rules)
-      await refreshProject(projectId)
       toast.success(`Imported ${result.imported} ${result.source.replace('_', ' ')} route rules`)
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to import route rules')
@@ -1318,7 +1389,7 @@ export default function ProjectSettings() {
       : []),
   ]
 
-  const filteredRouteRules = routeRules.filter(rule => {
+  const filteredRouteRules = (routeRules || []).filter(rule => {
     if (routeSourceFilter !== 'all' && rule.source !== routeSourceFilter) return false
     if (routeConfidenceFilter === 'high' && rule.confidence < 0.8) return false
     if (routeConfidenceFilter === 'medium' && (rule.confidence < 0.5 || rule.confidence >= 0.8)) return false
@@ -1478,6 +1549,16 @@ export default function ProjectSettings() {
                         </Select>
                         <p className="mt-1 text-xs text-muted-foreground">
                           Simple: issues have basic statuses. Managed: enables tickets with workflow, assignment, board view, and escalation.
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Framework</label>
+                        <Select value={framework} onChange={e => setFramework(e.target.value)} className="mt-1 max-w-xs">
+                          <option value="generic">Generic</option>
+                          <option value="codeigniter">CodeIgniter</option>
+                        </Select>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Project-wide framework preset used by route grouping and future framework-aware analysis.
                         </p>
                       </div>
                     </div>
@@ -1704,152 +1785,171 @@ export default function ProjectSettings() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="text-sm font-medium">Framework</label>
-                      <Select value={framework} onChange={e => setFramework(e.target.value)} className="mt-1 max-w-xs">
-                        <option value="generic">Generic</option>
-                        <option value="codeigniter">CodeIgniter</option>
-                      </Select>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        The importer and future route parsers use this to choose the right routing rules.
-                      </p>
-                    </div>
-                    <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-muted/20 p-4">
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium">Use canonical routes for URL grouping</p>
-                        <p className="text-xs text-muted-foreground">
-                          When enabled, incoming URLs try to match imported route rules before building the `by_url` fingerprint.
-                        </p>
-                      </div>
-                      <label className="inline-flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={routeGroupingEnabled}
-                          onChange={e => setRouteGroupingEnabled(e.target.checked)}
-                          className="h-4 w-4 rounded border-input bg-background"
-                        />
-                        Enabled
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-4 rounded-md border border-border/60 bg-muted/20 p-4">
+                  <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-muted/20 p-4">
                     <div className="space-y-1">
-                      <p className="text-sm font-medium">Import framework routes</p>
+                      <p className="text-sm font-medium">Use canonical routes for URL grouping</p>
                       <p className="text-xs text-muted-foreground">
-                        Source code import reads explicit route files from the connected repository or an available local checkout. CodeIgniter convention fallback also works at runtime even without imported rules.
+                        When enabled, incoming URLs try to match imported route rules before building the `by_url` fingerprint.
                       </p>
                     </div>
-                    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                      <div>
-                        <label className="text-sm font-medium">Import source</label>
-                        <Select value={routeImportSource} onChange={e => setRouteImportSource(e.target.value)} className="mt-1 max-w-xs">
-                          <option value="source_code">Source code</option>
-                          <option value="framework_convention">Framework conventions</option>
-                        </Select>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={!projectId || framework !== 'codeigniter' || importingRouteRules}
-                        onClick={handleImportRouteRules}
-                      >
-                        {importingRouteRules ? 'Importing...' : 'Import Rules'}
-                      </Button>
-                    </div>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={routeGroupingEnabled}
+                        onChange={e => setRouteGroupingEnabled(e.target.checked)}
+                        className="h-4 w-4 rounded border-input bg-background"
+                      />
+                      Enabled
+                    </label>
                   </div>
 
-                  <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 p-4 md:flex-row md:items-end md:justify-between">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div>
-                        <label className="text-sm font-medium">Filter by source</label>
-                        <Select value={routeSourceFilter} onChange={e => setRouteSourceFilter(e.target.value)} className="mt-1 max-w-xs">
-                          <option value="all">All sources</option>
-                          <option value="manual">Manual</option>
-                          <option value="source_code">Source code</option>
-                          <option value="framework_convention">Framework convention</option>
-                          <option value="observed_issue">Observed issue</option>
-                          <option value="ai_suggestion">AI suggestion</option>
-                        </Select>
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium">Filter by confidence</label>
-                        <Select value={routeConfidenceFilter} onChange={e => setRouteConfidenceFilter(e.target.value)} className="mt-1 max-w-xs">
-                          <option value="all">All confidence levels</option>
-                          <option value="high">High (≥ 0.8)</option>
-                          <option value="medium">Medium (0.5 - 0.79)</option>
-                          <option value="low">Low (&lt; 0.5)</option>
-                        </Select>
-                      </div>
-                    </div>
-                    <Button type="button" variant="outline" onClick={openCreateRouteRule}>
-                      Create Manual Rule
-                    </Button>
-                  </div>
+                  {routeGroupingEnabled && (
+                    <>
+                      {framework === 'generic' && (
+                        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                          Select a project framework in <span className="font-medium">General settings</span> before importing route rules.
+                        </div>
+                      )}
 
-                  <div className="overflow-x-auto rounded-md border border-border/60">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                        <tr>
-                          <th className="px-3 py-2 font-medium">On</th>
-                          <th className="px-3 py-2 font-medium">Method</th>
-                          <th className="px-3 py-2 font-medium">Template</th>
-                          <th className="px-3 py-2 font-medium">Target</th>
-                          <th className="px-3 py-2 font-medium">Source</th>
-                          <th className="px-3 py-2 font-medium">Confidence</th>
-                          <th className="px-3 py-2 font-medium">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredRouteRules.length === 0 ? (
-                          <tr>
-                            <td colSpan={7} className="px-3 py-6 text-center text-sm text-muted-foreground">
-                              No route rules imported yet.
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredRouteRules.map(rule => (
-                            <tr key={rule.id} className="border-t border-border/50 align-top">
-                              <td className="px-3 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={rule.enabled}
-                                  disabled={updatingRouteRuleId === rule.id}
-                                  onChange={e => handleToggleRouteRule(rule, e.target.checked)}
-                                  className="mt-1 h-4 w-4 rounded border-input bg-background"
-                                />
-                              </td>
-                              <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{rule.method}</td>
-                              <td className="px-3 py-2">
-                                <div className="font-mono text-xs">{rule.canonical_path}</div>
-                                <div className="mt-1 font-mono text-[11px] text-muted-foreground">{rule.match_pattern}</div>
-                              </td>
-                              <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{rule.target || '—'}</td>
-                              <td className="px-3 py-2 text-xs text-muted-foreground">
-                                <div>{rule.source}</div>
-                                {rule.source_file && <div className="mt-1 font-mono text-[11px]">{rule.source_file}</div>}
-                              </td>
-                              <td className="px-3 py-2 text-xs text-muted-foreground">{rule.confidence.toFixed(2)}</td>
-                              <td className="px-3 py-2">
-                                <div className="flex gap-2">
-                                  <Button type="button" variant="outline" size="sm" onClick={() => openEditRouteRule(rule)}>
-                                    Edit
-                                  </Button>
-                                  <Button type="button" variant="outline" size="sm" onClick={() => handleDeleteRouteRule(rule)} disabled={updatingRouteRuleId === rule.id}>
-                                    Delete
-                                  </Button>
-                                </div>
-                              </td>
+                      <div className="flex flex-col gap-4 rounded-md border border-border/60 bg-muted/20 p-4">
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">Import framework routes</p>
+                          <p className="text-xs text-muted-foreground">
+                            Source code import reads explicit route files from the connected repository or an available local checkout. CodeIgniter convention fallback also works at runtime even without imported rules.
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                          <div>
+                            <label className="text-sm font-medium">Import source</label>
+                            <Select value={routeImportSource} onChange={e => setRouteImportSource(e.target.value)} className="mt-1 max-w-xs">
+                              <option value="source_code">Source code</option>
+                              <option value="framework_convention">Framework conventions</option>
+                            </Select>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!projectId || importingRouteRules}
+                            onClick={handleImportRouteRules}
+                          >
+                            {importingRouteRules ? 'Importing...' : 'Import Rules'}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 p-4 md:flex-row md:items-end md:justify-between">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">Filter by source</label>
+                            <Select value={routeSourceFilter} onChange={e => setRouteSourceFilter(e.target.value)} className="mt-1 max-w-xs">
+                              <option value="all">All sources</option>
+                              <option value="manual">Manual</option>
+                              <option value="source_code">Source code</option>
+                              <option value="framework_convention">Framework convention</option>
+                              <option value="observed_issue">Observed issue</option>
+                              <option value="ai_suggestion">AI suggestion</option>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Filter by confidence</label>
+                            <Select value={routeConfidenceFilter} onChange={e => setRouteConfidenceFilter(e.target.value)} className="mt-1 max-w-xs">
+                              <option value="all">All confidence levels</option>
+                              <option value="high">High (≥ 0.8)</option>
+                              <option value="medium">Medium (0.5 - 0.79)</option>
+                              <option value="low">Low (&lt; 0.5)</option>
+                            </Select>
+                          </div>
+                        </div>
+                        <Button type="button" variant="outline" onClick={openCreateRouteRule}>
+                          Create Manual Rule
+                        </Button>
+                      </div>
+
+                      <div className="overflow-x-auto rounded-md border border-border/60">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                            <tr>
+                              <th className="px-3 py-2 font-medium">On</th>
+                              <th className="px-3 py-2 font-medium">Method</th>
+                              <th className="px-3 py-2 font-medium">Template</th>
+                              <th className="px-3 py-2 font-medium">Target</th>
+                              <th className="px-3 py-2 font-medium">Source</th>
+                              <th className="px-3 py-2 font-medium">Confidence</th>
+                              <th className="px-3 py-2 font-medium">Actions</th>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                          </thead>
+                          <tbody>
+                            {filteredRouteRules.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                  No route rules imported yet.
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredRouteRules.map(rule => (
+                                <tr key={rule.id} className="border-t border-border/50 align-top">
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={rule.enabled}
+                                      disabled={updatingRouteRuleId === rule.id}
+                                      onChange={e => handleToggleRouteRule(rule, e.target.checked)}
+                                      className="mt-1 h-4 w-4 rounded border-input bg-background"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{rule.method}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="font-mono text-xs">{rule.canonical_path}</div>
+                                    <div className="mt-1 font-mono text-[11px] text-muted-foreground">{rule.match_pattern}</div>
+                                  </td>
+                                  <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{rule.target || '—'}</td>
+                                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                                    <div>{rule.source}</div>
+                                    {rule.source_file && <div className="mt-1 font-mono text-[11px]">{rule.source_file}</div>}
+                                  </td>
+                                  <td className="px-3 py-2 text-xs text-muted-foreground">{rule.confidence.toFixed(2)}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex gap-2">
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditRouteRule(rule)}>
+                                            <Pencil className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Edit rule</TooltipContent>
+                                      </Tooltip>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8"
+                                            onClick={() => handleDeleteRouteRule(rule)}
+                                            disabled={updatingRouteRuleId === rule.id}
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Delete rule</TooltipContent>
+                                      </Tooltip>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
 
                   <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-xs text-muted-foreground">Framework and route grouping are saved together with issue settings.</p>
+                    <p className="text-xs text-muted-foreground">
+                      {routeGroupingEnabled
+                        ? 'Route grouping settings are saved together with issue settings.'
+                        : 'Enable canonical routes only if you want framework-aware URL grouping.'}
+                    </p>
                     <Button onClick={handleSaveIssues} disabled={savingIssues}>
                       {savingIssues ? 'Saving...' : 'Save Route Grouping Settings'}
                     </Button>
@@ -1952,73 +2052,84 @@ export default function ProjectSettings() {
                     </label>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="text-sm font-medium">Driver</label>
-                      <Select value={analysisDbDriver} onChange={e => setAnalysisDbDriver(e.target.value)} className="mt-1">
-                        <option value="">Select driver</option>
-                        <option value="postgres">PostgreSQL</option>
-                        <option value="mysql">MySQL / MariaDB</option>
-                      </Select>
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium">Database Name</label>
-                      <Input value={analysisDbName} onChange={e => setAnalysisDbName(e.target.value)} placeholder="Optional label for the target database" className="mt-1" />
-                    </div>
-                  </div>
+                  {analysisDbEnabled && (
+                    <>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="text-sm font-medium">Driver</label>
+                          <Select value={analysisDbDriver} onChange={e => setAnalysisDbDriver(e.target.value)} className="mt-1">
+                            <option value="">Select driver</option>
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="mysql">MySQL / MariaDB</option>
+                          </Select>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Database Name</label>
+                          <Input value={analysisDbName} onChange={e => setAnalysisDbName(e.target.value)} placeholder="Optional label for the target database" className="mt-1" />
+                        </div>
+                      </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="text-sm font-medium">Schema</label>
-                      <Input value={analysisDbSchema} onChange={e => setAnalysisDbSchema(e.target.value)} placeholder="Optional schema (for PostgreSQL)" className="mt-1" />
-                    </div>
-                    <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-                      {project?.analysis_db_configured
-                        ? 'A database analysis DSN is already stored for this project.'
-                        : 'No database analysis DSN stored yet.'}
-                    </div>
-                  </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="text-sm font-medium">Schema</label>
+                          <Input value={analysisDbSchema} onChange={e => setAnalysisDbSchema(e.target.value)} placeholder="Optional schema (for PostgreSQL)" className="mt-1" />
+                        </div>
+                        <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+                          {project?.analysis_db_configured
+                            ? 'A database analysis DSN is already stored for this project.'
+                            : 'No database analysis DSN stored yet.'}
+                        </div>
+                      </div>
 
-                  <div>
-                    <label className="text-sm font-medium">Connection String</label>
-                    <Input
-                      type="password"
-                      value={analysisDbDsn}
-                      onChange={e => setAnalysisDbDsn(e.target.value)}
-                      placeholder={project?.analysis_db_configured ? 'Leave blank to keep the existing DSN' : 'postgres://... or user:pass@tcp(host:3306)/db'}
-                      className="mt-1"
-                    />
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      The DSN is stored server-side and never returned to the browser. Leave it blank to keep the existing value.
-                    </p>
-                  </div>
+                      <div>
+                        <div className="flex items-center justify-between gap-3">
+                          <label className="text-sm font-medium">Connection String</label>
+                          <Button type="button" variant="outline" size="sm" onClick={openAnalysisDbGenerator}>
+                            Generate
+                          </Button>
+                        </div>
+                        <Input
+                          type="password"
+                          value={analysisDbDsn}
+                          onChange={e => setAnalysisDbDsn(e.target.value)}
+                          placeholder={project?.analysis_db_configured ? 'Leave blank to keep the existing DSN' : 'postgres://... or user:pass@tcp(host:3306)/db'}
+                          className="mt-1"
+                        />
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          The DSN is stored server-side and never returned to the browser. Leave it blank to keep the existing value.
+                        </p>
+                      </div>
 
-                  {project?.analysis_db_dsn_display && (
-                    <div>
-                      <label className="text-sm font-medium">Stored DSN</label>
-                      <code className="mt-1 block rounded bg-muted px-3 py-2 text-sm font-mono break-all">
-                        {project.analysis_db_dsn_display}
-                      </code>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Passwords are redacted in the displayed value.
-                      </p>
-                    </div>
+                      {project?.analysis_db_dsn_display && (
+                        <div>
+                          <label className="text-sm font-medium">Stored DSN</label>
+                          <code className="mt-1 block rounded bg-muted px-3 py-2 text-sm font-mono break-all">
+                            {project.analysis_db_dsn_display}
+                          </code>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Passwords are redacted in the displayed value.
+                          </p>
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="text-sm font-medium">Notes</label>
+                        <textarea
+                          value={analysisDbNotes}
+                          onChange={e => setAnalysisDbNotes(e.target.value)}
+                          placeholder="Optional notes for the team: read-only user, replica hostname, schema caveats, etc."
+                          rows={3}
+                          className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        />
+                      </div>
+                    </>
                   )}
-
-                  <div>
-                    <label className="text-sm font-medium">Notes</label>
-                    <textarea
-                      value={analysisDbNotes}
-                      onChange={e => setAnalysisDbNotes(e.target.value)}
-                      placeholder="Optional notes for the team: read-only user, replica hostname, schema caveats, etc."
-                      rows={3}
-                      className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    />
-                  </div>
 
                   <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-xs text-muted-foreground">
-                      Save the connection here, then use <span className="font-medium text-foreground">Analyze</span> from issue SQL breadcrumbs.
+                      {analysisDbEnabled
+                        ? <>Save the connection here, then use <span className="font-medium text-foreground">Analyze</span> from issue SQL breadcrumbs.</>
+                        : 'Enable database analysis only when this project should allow SQL breadcrumb analysis and EXPLAIN tooling.'}
                     </p>
                     <div className="flex gap-2">
                       <Button variant="outline" onClick={handleTestAnalysisDB} disabled={!canTestAnalysisDB || testingAnalysisDb}>
@@ -2029,6 +2140,77 @@ export default function ProjectSettings() {
                       </Button>
                     </div>
                   </div>
+
+                  <Dialog open={showAnalysisDbGenerator} onOpenChange={setShowAnalysisDbGenerator}>
+                    <DialogContent>
+                      <DialogTitle>Generate Connection String</DialogTitle>
+                      <DialogDescription>
+                        Build a DSN from host, port, credentials, and database details instead of typing it manually.
+                      </DialogDescription>
+                      <div className="mt-4 grid gap-4">
+                        <div>
+                          <label className="text-sm font-medium">Driver</label>
+                          <Select
+                            value={analysisDbGeneratorDriver}
+                            onChange={e => {
+                              const nextDriver = e.target.value
+                              setAnalysisDbGeneratorDriver(nextDriver)
+                              setAnalysisDbGeneratorPort(defaultAnalysisDbPort(nextDriver))
+                              setAnalysisDbGeneratorParams(nextDriver === 'mysql' ? 'parseTime=true' : 'sslmode=disable')
+                            }}
+                            className="mt-1"
+                          >
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="mysql">MySQL / MariaDB</option>
+                          </Select>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">Host / URL</label>
+                            <Input value={analysisDbGeneratorHost} onChange={e => setAnalysisDbGeneratorHost(e.target.value)} className="mt-1" placeholder="db.example.internal" />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Port</label>
+                            <Input value={analysisDbGeneratorPort} onChange={e => setAnalysisDbGeneratorPort(e.target.value)} className="mt-1" placeholder={defaultAnalysisDbPort(analysisDbGeneratorDriver || 'postgres')} />
+                          </div>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">User</label>
+                            <Input value={analysisDbGeneratorUser} onChange={e => setAnalysisDbGeneratorUser(e.target.value)} className="mt-1" placeholder="readonly_user" />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Password</label>
+                            <Input type="password" value={analysisDbGeneratorPassword} onChange={e => setAnalysisDbGeneratorPassword(e.target.value)} className="mt-1" placeholder="password" />
+                          </div>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">Database</label>
+                            <Input value={analysisDbGeneratorDatabase} onChange={e => setAnalysisDbGeneratorDatabase(e.target.value)} className="mt-1" placeholder="gosnag_reporting" />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Query Params</label>
+                            <Input value={analysisDbGeneratorParams} onChange={e => setAnalysisDbGeneratorParams(e.target.value)} className="mt-1" placeholder={analysisDbGeneratorDriver === 'mysql' ? 'parseTime=true' : 'sslmode=require'} />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Preview</label>
+                          <code className="mt-1 block rounded bg-muted px-3 py-2 text-sm font-mono break-all">
+                            {buildGeneratedAnalysisDbDsn() || 'Fill the form to preview the generated connection string.'}
+                          </code>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button type="button" variant="outline" onClick={() => setShowAnalysisDbGenerator(false)}>
+                            Cancel
+                          </Button>
+                          <Button type="button" onClick={handleUseGeneratedAnalysisDbDsn} disabled={!canUseGeneratedAnalysisDbDsn}>
+                            Use Connection String
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </CardContent>
               </Card>
             </>

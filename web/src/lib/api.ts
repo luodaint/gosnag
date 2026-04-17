@@ -69,7 +69,7 @@ export const api = {
   listRouteRules: (projectId: string) => request<RouteRule[]>(`/projects/${projectId}/route-rules`),
   createRouteRule: (projectId: string, data: RouteRuleInput) =>
     request<RouteRule>(`/projects/${projectId}/route-rules`, { method: 'POST', body: JSON.stringify(data) }),
-  importRouteRules: (projectId: string, data?: { source?: string }) =>
+  importRouteRules: (projectId: string, data?: { source?: string; framework?: string }) =>
     request<{ imported: number; source: string; rules: RouteRule[] }>(`/projects/${projectId}/route-rules/import`, { method: 'POST', body: JSON.stringify(data || {}) }),
   updateRouteRule: (projectId: string, ruleId: string, data: RouteRuleInput) =>
     request<RouteRule>(`/projects/${projectId}/route-rules/${ruleId}`, { method: 'PUT', body: JSON.stringify(data) }),

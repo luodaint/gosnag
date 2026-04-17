@@ -76,7 +76,7 @@ func ListRules(ctx context.Context, queries *db.Queries, projectID uuid.UUID) ([
 	}
 	defer rows.Close()
 
-	var items []Rule
+	items := make([]Rule, 0)
 	for rows.Next() {
 		var r Rule
 		if err := rows.Scan(
@@ -117,7 +117,7 @@ func ListEnabledRules(ctx context.Context, queries *db.Queries, projectID uuid.U
 	}
 	defer rows.Close()
 
-	var items []Rule
+	items := make([]Rule, 0)
 	for rows.Next() {
 		var r Rule
 		if err := rows.Scan(
