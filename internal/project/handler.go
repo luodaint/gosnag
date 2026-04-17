@@ -318,7 +318,121 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		cooldown = *req.DefaultCooldownMinutes
 	}
 
-	project, err := h.queries.CreateProject(r.Context(), db.CreateProjectParams{
+	settings := DefaultProjectSettings()
+	if req.WarningAsError != nil {
+		settings.WarningAsError = *req.WarningAsError
+	}
+	if req.MaxEventsPerIssue != nil {
+		settings.MaxEventsPerIssue = *req.MaxEventsPerIssue
+	}
+	if req.MaxInfoIssues != nil && *req.MaxInfoIssues >= 0 {
+		settings.MaxInfoIssues = *req.MaxInfoIssues
+	}
+	if req.IssueDisplayMode != "" {
+		settings.IssueDisplayMode = req.IssueDisplayMode
+	}
+	if req.ErrorGroupingMode != "" {
+		settings.ErrorGroupingMode = normalizeIssueGroupingMode(req.ErrorGroupingMode)
+	}
+	if req.WarningGroupingMode != "" {
+		settings.WarningGroupingMode = normalizeIssueGroupingMode(req.WarningGroupingMode)
+	}
+	if req.InfoGroupingMode != "" {
+		settings.InfoGroupingMode = normalizeIssueGroupingMode(req.InfoGroupingMode)
+	}
+	settings.JiraBaseURL = req.JiraBaseURL
+	settings.JiraEmail = req.JiraEmail
+	settings.JiraAPIToken = req.JiraAPIToken
+	settings.JiraProjectKey = req.JiraProjectKey
+	if req.JiraIssueType != "" {
+		settings.JiraIssueType = req.JiraIssueType
+	}
+	settings.GithubToken = req.GithubToken
+	settings.GithubOwner = req.GithubOwner
+	settings.GithubRepo = req.GithubRepo
+	if req.GithubLabels != "" {
+		settings.GithubLabels = req.GithubLabels
+	}
+	settings.RepoProvider = req.RepoProvider
+	settings.RepoOwner = req.RepoOwner
+	settings.RepoName = req.RepoName
+	if req.RepoDefaultBranch != "" {
+		settings.RepoDefaultBranch = req.RepoDefaultBranch
+	}
+	settings.RepoToken = req.RepoToken
+	settings.RepoPathStrip = req.RepoPathStrip
+	if req.AIEnabled != nil {
+		settings.AIEnabled = *req.AIEnabled
+	}
+	if req.AIModel != "" {
+		settings.AIModel = req.AIModel
+	}
+	if req.AIMergeSuggestions != nil {
+		settings.AIMergeSuggestions = *req.AIMergeSuggestions
+	}
+	if req.AIAutoMerge != nil {
+		settings.AIAutoMerge = *req.AIAutoMerge
+	}
+	if req.AIAnomalyDetection != nil {
+		settings.AIAnomalyDetection = *req.AIAnomalyDetection
+	}
+	if req.AITicketDescription != nil {
+		settings.AITicketDescription = *req.AITicketDescription
+	}
+	if req.AIRootCause != nil {
+		settings.AIRootCause = *req.AIRootCause
+	}
+	if req.AITriage != nil {
+		settings.AITriage = *req.AITriage
+	}
+	if req.StacktraceRules != nil {
+		stacktraceRules := normalizeStacktraceRules(*req.StacktraceRules)
+		if err := validateStacktraceRules(stacktraceRules); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		settings.StacktraceRules = marshalStacktraceRules(stacktraceRules)
+	}
+	if req.AnalysisDBEnabled != nil {
+		settings.AnalysisDBEnabled = *req.AnalysisDBEnabled
+	}
+	if req.AnalysisDBDriver != nil {
+		settings.AnalysisDBDriver = strings.TrimSpace(*req.AnalysisDBDriver)
+	}
+	if req.AnalysisDBDSN != nil {
+		settings.AnalysisDBDSN = strings.TrimSpace(*req.AnalysisDBDSN)
+	}
+	if req.AnalysisDBName != nil {
+		settings.AnalysisDBName = strings.TrimSpace(*req.AnalysisDBName)
+	}
+	if req.AnalysisDBSchema != nil {
+		settings.AnalysisDBSchema = strings.TrimSpace(*req.AnalysisDBSchema)
+	}
+	if req.AnalysisDBNotes != nil {
+		settings.AnalysisDBNotes = strings.TrimSpace(*req.AnalysisDBNotes)
+	}
+	if req.Framework != nil {
+		settings.Framework = strings.TrimSpace(*req.Framework)
+	}
+	if req.RouteGroupingEnabled != nil {
+		settings.RouteGroupingEnabled = *req.RouteGroupingEnabled
+	}
+
+	rawdb, ok := h.queries.RawDB().(*sql.DB)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "project store is not transaction-capable")
+		return
+	}
+	tx, err := rawdb.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start project creation")
+		return
+	}
+	defer tx.Rollback()
+
+	txQueries := h.queries.WithTx(tx)
+
+	project, err := txQueries.CreateProject(r.Context(), db.CreateProjectParams{
 		Name:                   req.Name,
 		Slug:                   req.Slug,
 		DefaultCooldownMinutes: cooldown,
@@ -334,7 +448,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-create a default API key
 	pubKey, secKey := generateKeyPair()
-	key, err := h.queries.CreateProjectKey(r.Context(), db.CreateProjectKeyParams{
+	key, err := txQueries.CreateProjectKey(r.Context(), db.CreateProjectKeyParams{
 		ProjectID: project.ID,
 		PublicKey: pubKey,
 		SecretKey: secKey,
@@ -345,14 +459,19 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := saveProjectSettings(r.Context(), txQueries, project.ID, settings); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to initialize project settings")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finalize project creation")
+		return
+	}
+
 	h.cache.InvalidateSync(r.Context())
 	dsn := buildDSN(r, key.PublicKey, project.NumericID)
 	legacyDSN := buildLegacyDSN(r, key.PublicKey, project.ID)
-	settings, err := loadProjectSettings(r.Context(), h.queries, project)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load project settings")
-		return
-	}
+	settings.normalizeDefaults()
 	writeJSON(w, http.StatusCreated, ProjectResponse{SafeProject: toSafeProject(project, settings), DSN: dsn, LegacyDSN: legacyDSN})
 }
 
@@ -697,44 +816,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Name:                   name,
 		Slug:                   slug,
 		DefaultCooldownMinutes: cooldown,
-		WarningAsError:         warningAsError,
-		JiraBaseUrl:            jiraBaseURL,
-		JiraEmail:              jiraEmail,
-		JiraApiToken:           jiraApiToken,
-		JiraProjectKey:         jiraProjectKey,
-		JiraIssueType:          jiraIssueType,
-		MaxEventsPerIssue:      maxEvents,
-		MaxInfoIssues:          maxInfoIssues,
 		Icon:                   icon,
 		Color:                  color,
-		IssueDisplayMode:       issueDisplayMode,
-		InfoGroupingMode:       infoGroupingMode,
-		GithubToken:            githubToken,
-		GithubOwner:            githubOwner,
-		GithubRepo:             githubRepo,
-		GithubLabels:           githubLabels,
 		WorkflowMode:           workflowMode,
-		RepoProvider:           repoProvider,
-		RepoOwner:              repoOwner,
-		RepoName:               repoName,
-		RepoDefaultBranch:      repoDefaultBranch,
-		RepoToken:              repoToken,
-		RepoPathStrip:          repoPathStrip,
-		AiEnabled:              aiEnabled,
-		AiModel:                aiModel,
-		AiMergeSuggestions:     aiMergeSuggestions,
-		AiAutoMerge:            aiAutoMerge,
-		AiAnomalyDetection:     aiAnomalyDetection,
-		AiTicketDescription:    aiTicketDescription,
-		AiRootCause:            aiRootCause,
-		AiTriage:               aiTriage,
-		StacktraceRules:        marshalStacktraceRules(stacktraceRules),
-		AnalysisDbEnabled:      analysisDBEnabled,
-		AnalysisDbDriver:       analysisDBDriver,
-		AnalysisDbDsn:          analysisDBDSN,
-		AnalysisDbName:         analysisDBName,
-		AnalysisDbSchema:       analysisDBSchema,
-		AnalysisDbNotes:        analysisDBNotes,
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -40,13 +41,13 @@ func (h *Handler) TestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.queries.GetProject(r.Context(), projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(r.Context(), h.queries, projectID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
 
-	cfg := ConfigFromProject(project)
+	cfg := ConfigFromSettings(settings)
 	if !cfg.IsConfigured() {
 		writeError(w, http.StatusBadRequest, "repository not configured")
 		return
@@ -99,13 +100,13 @@ func (h *Handler) SuspectCommits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.queries.GetProject(r.Context(), projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(r.Context(), h.queries, projectID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
 
-	cfg := ConfigFromProject(project)
+	cfg := ConfigFromSettings(settings)
 	if !cfg.IsConfigured() {
 		writeJSON(w, http.StatusOK, map[string]any{"commits": []any{}})
 		return

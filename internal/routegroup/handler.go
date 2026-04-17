@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/darkspock/gosnag/internal/sourcecode"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -161,7 +162,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.queries.GetProject(r.Context(), projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(r.Context(), h.queries, projectID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
@@ -192,7 +193,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	var rules []ImportRule
 	switch source {
 	case "source_code":
-		cfg := sourcecode.ConfigFromProject(project)
+		cfg := sourcecode.ConfigFromSettings(settings)
 		provider := sourcecode.NewImportProvider(cfg)
 		if provider == nil {
 			writeError(w, http.StatusBadRequest, "source code is not available from a connected repository or local checkout")

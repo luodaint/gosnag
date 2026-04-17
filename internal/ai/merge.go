@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
 )
@@ -47,9 +48,14 @@ func (mc *MergeChecker) Run(ctx context.Context, interval time.Duration) {
 }
 
 func (mc *MergeChecker) check(ctx context.Context) {
-	projects, err := mc.queries.ListAIEnabledProjects(ctx)
+	projects, err := mc.queries.ListProjects(ctx)
 	if err != nil {
 		slog.Error("ai merge: failed to list projects", "error", err)
+		return
+	}
+	settingsMap, err := projectcfg.LoadSettingsMap(ctx, mc.queries, projects)
+	if err != nil {
+		slog.Error("ai merge: failed to load project settings", "error", err)
 		return
 	}
 
@@ -57,7 +63,8 @@ func (mc *MergeChecker) check(ctx context.Context) {
 	mc.lastRun = time.Now()
 
 	for _, project := range projects {
-		if !project.AiEnabled || !project.AiMergeSuggestions {
+		settings := settingsMap[project.ID]
+		if !settings.AIEnabled || !settings.AIMergeSuggestions {
 			continue
 		}
 
@@ -96,12 +103,12 @@ func (mc *MergeChecker) check(ctx context.Context) {
 			}
 			evaluated++
 
-			mc.evaluateIssue(ctx, project, newIssue, pendingSet)
+			mc.evaluateIssue(ctx, project, settings, newIssue, pendingSet)
 		}
 	}
 }
 
-func (mc *MergeChecker) evaluateIssue(ctx context.Context, project db.Project, newIssue db.Issue, pendingSet map[uuid.UUID]bool) {
+func (mc *MergeChecker) evaluateIssue(ctx context.Context, project db.Project, settings projectcfg.ProjectSettings, newIssue db.Issue, pendingSet map[uuid.UUID]bool) {
 	// Fetch candidates (recent open issues, excluding the new one and issues with pending suggestions)
 	candidates, err := mc.queries.ListRecentOpenIssues(ctx, db.ListRecentOpenIssuesParams{
 		ProjectID: project.ID,
@@ -191,7 +198,7 @@ func (mc *MergeChecker) evaluateIssue(ctx context.Context, project db.Project, n
 		return
 	}
 
-	if project.AiAutoMerge {
+	if settings.AIAutoMerge {
 		// Auto-merge: execute merge directly in a transaction
 		if err := mc.executeMerge(ctx, project.ID, newIssue, targetID, result.Reason); err != nil {
 			slog.Error("ai merge: auto-merge failed", "error", err, "source", newIssue.ID, "target", targetID)

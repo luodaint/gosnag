@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -30,12 +31,12 @@ func ResolveRelease(ctx context.Context, queries *db.Queries, projectID uuid.UUI
 	}
 
 	// Resolve via Git provider
-	project, err := queries.GetProject(ctx, projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(ctx, queries, projectID)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg := ConfigFromProject(project)
+	cfg := ConfigFromSettings(settings)
 	if !cfg.IsConfigured() {
 		return nil, nil
 	}
@@ -109,7 +110,7 @@ func (h *Handler) GetReleaseInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.queries.GetProject(r.Context(), projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(r.Context(), h.queries, projectID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
@@ -119,7 +120,7 @@ func (h *Handler) GetReleaseInfo(w http.ResponseWriter, r *http.Request) {
 		"first_release": issue.FirstRelease,
 	}
 
-	cfg := ConfigFromProject(project)
+	cfg := ConfigFromSettings(settings)
 
 	// Resolve first release to commit
 	if issue.FirstRelease != "" && issue.FirstRelease != "unknown" {
@@ -196,7 +197,10 @@ func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
 
 	// Also cache the release→commit mapping if commit is provided
 	if req.Commit != "" {
-		cfg := ConfigFromProject(func() db.Project { p, _ := h.queries.GetProject(r.Context(), projectID); return p }())
+		cfg := Config{}
+		if _, settings, err := projectcfg.LoadSettingsByProjectID(r.Context(), h.queries, projectID); err == nil {
+			cfg = ConfigFromSettings(settings)
+		}
 		commitURL := ""
 		if cfg.Provider == "github" {
 			commitURL = fmt.Sprintf("https://github.com/%s/%s/commit/%s", cfg.Owner, cfg.Name, req.Commit)

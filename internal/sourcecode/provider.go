@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 )
 
 // Provider abstracts source code hosting operations.
@@ -46,15 +46,14 @@ type Config struct {
 	PathStrip     string
 }
 
-// ConfigFromProject extracts source code config from a project.
-func ConfigFromProject(p db.Project) Config {
+func ConfigFromSettings(settings projectcfg.ProjectSettings) Config {
 	return Config{
-		Provider:      p.RepoProvider,
-		Owner:         p.RepoOwner,
-		Name:          p.RepoName,
-		DefaultBranch: p.RepoDefaultBranch,
-		Token:         p.RepoToken,
-		PathStrip:     p.RepoPathStrip,
+		Provider:      settings.RepoProvider,
+		Owner:         settings.RepoOwner,
+		Name:          settings.RepoName,
+		DefaultBranch: settings.RepoDefaultBranch,
+		Token:         settings.RepoToken,
+		PathStrip:     settings.RepoPathStrip,
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/darkspock/gosnag/internal/ai"
 	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 )
 
@@ -24,7 +25,7 @@ func AutoTag(ctx context.Context, queries *db.Queries, aiService *ai.Service, pr
 	if err != nil || len(rules) == 0 {
 		return
 	}
-	project, err := queries.GetProject(ctx, projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(ctx, queries, projectID)
 	if err != nil {
 		return
 	}
@@ -38,7 +39,7 @@ func AutoTag(ctx context.Context, queries *db.Queries, aiService *ai.Service, pr
 		Level:       issue.Level,
 		Platform:    issue.Platform,
 		EventCount:  issue.EventCount,
-		HasAppFrame: conditions.HasAppFrame(eventData, project.StacktraceRules),
+		HasAppFrame: conditions.HasAppFrame(eventData, settings.StacktraceRules),
 	}, string(eventData), nil)
 
 	for _, rule := range rules {

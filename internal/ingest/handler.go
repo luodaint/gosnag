@@ -160,6 +160,7 @@ func isInformationalLevel(level string) bool {
 
 type issueSettings struct {
 	WarningAsError      bool
+	MaxEventsPerIssue   int32
 	MaxInfoIssues       int32
 	ErrorGroupingMode   string
 	WarningGroupingMode string
@@ -177,21 +178,23 @@ func normalizeGroupingMode(mode string) string {
 
 func loadIssueSettings(ctx context.Context, queries *db.Queries, project db.Project) issueSettings {
 	settings := issueSettings{
-		WarningAsError:      project.WarningAsError,
-		MaxInfoIssues:       project.MaxInfoIssues,
-		ErrorGroupingMode:   normalizeGroupingMode(project.InfoGroupingMode),
-		WarningGroupingMode: normalizeGroupingMode(project.InfoGroupingMode),
-		InfoGroupingMode:    normalizeGroupingMode(project.InfoGroupingMode),
+		WarningAsError:      false,
+		MaxEventsPerIssue:   1000,
+		MaxInfoIssues:       0,
+		ErrorGroupingMode:   "normal",
+		WarningGroupingMode: "normal",
+		InfoGroupingMode:    "normal",
 	}
 	if queries == nil {
 		return settings
 	}
 	if err := queries.RawDB().QueryRowContext(ctx, `
-		SELECT warning_as_error, max_info_issues, error_grouping_mode, warning_grouping_mode, info_grouping_mode
+		SELECT warning_as_error, max_events_per_issue, max_info_issues, error_grouping_mode, warning_grouping_mode, info_grouping_mode
 		FROM project_issue_settings
 		WHERE project_id = $1
 	`, project.ID).Scan(
 		&settings.WarningAsError,
+		&settings.MaxEventsPerIssue,
 		&settings.MaxInfoIssues,
 		&settings.ErrorGroupingMode,
 		&settings.WarningGroupingMode,
@@ -325,7 +328,7 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 				return
 			}
 			if reachedLimit {
-				slog.Warn("dropping new informational issue because max_info_issues limit was reached", "project_id", projectID, "fingerprint", fingerprint, "limit", project.MaxInfoIssues)
+				slog.Warn("dropping new informational issue because max_info_issues limit was reached", "project_id", projectID, "fingerprint", fingerprint, "limit", settings.MaxInfoIssues)
 				return
 			}
 		} else if err != nil {
@@ -405,8 +408,7 @@ func (h *Handler) processEvent(r *http.Request, project db.Project, event *Sentr
 	}
 
 	// Check per-issue event cap (0 = unlimited)
-	maxEvents := project.MaxEventsPerIssue
-	if maxEvents > 0 && issue.EventCount > maxEvents {
+	if settings.MaxEventsPerIssue > 0 && issue.EventCount > settings.MaxEventsPerIssue {
 		return
 	}
 

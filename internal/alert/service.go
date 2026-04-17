@@ -12,6 +12,7 @@ import (
 	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 )
 
@@ -100,7 +101,7 @@ func (s *Service) Notify(projectID uuid.UUID, issue db.Issue, isNew bool) {
 		return
 	}
 
-	project, err := s.queries.GetProject(ctx, projectID)
+	project, settings, err := projectcfg.LoadSettingsByProjectID(ctx, s.queries, projectID)
 	if err != nil {
 		slog.Error("failed to get project for alert", "error", err, "project_id", projectID)
 		return
@@ -130,7 +131,7 @@ func (s *Service) Notify(projectID uuid.UUID, issue db.Issue, isNew bool) {
 		Platform:    issue.Platform,
 		EventCount:  issue.EventCount,
 		Priority:    issue.Priority,
-		HasAppFrame: conditions.HasAppFrame(eventData, project.StacktraceRules),
+		HasAppFrame: conditions.HasAppFrame(eventData, settings.StacktraceRules),
 	}, string(eventData), loader)
 
 	for _, ac := range configs {

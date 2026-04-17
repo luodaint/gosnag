@@ -9,15 +9,16 @@ import (
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 )
 
 // DeployAnalyzer checks recent deploys and runs anomaly detection.
 type DeployAnalyzer struct {
-	queries     *db.Queries
-	service     *Service
-	alertFunc   func(projectID uuid.UUID, severity, summary, details string)
-	analyzed    map[uuid.UUID]bool // track already-analyzed deploy IDs
+	queries   *db.Queries
+	service   *Service
+	alertFunc func(projectID uuid.UUID, severity, summary, details string)
+	analyzed  map[uuid.UUID]bool // track already-analyzed deploy IDs
 }
 
 // NewDeployAnalyzer creates a new deploy analyzer.
@@ -45,14 +46,20 @@ func (da *DeployAnalyzer) Run(ctx context.Context, interval time.Duration) {
 }
 
 func (da *DeployAnalyzer) check(ctx context.Context) {
-	projects, err := da.queries.ListAIEnabledProjects(ctx)
+	projects, err := da.queries.ListProjects(ctx)
 	if err != nil {
 		slog.Error("ai deploy: failed to list projects", "error", err)
 		return
 	}
+	settingsMap, err := projectcfg.LoadSettingsMap(ctx, da.queries, projects)
+	if err != nil {
+		slog.Error("ai deploy: failed to load project settings", "error", err)
+		return
+	}
 
 	for _, project := range projects {
-		if !project.AiEnabled || !project.AiAnomalyDetection {
+		settings := settingsMap[project.ID]
+		if !settings.AIEnabled || !settings.AIAnomalyDetection {
 			continue
 		}
 
@@ -97,13 +104,13 @@ func (da *DeployAnalyzer) analyzeDeploy(ctx context.Context, project db.Project,
 
 	// Count events pre and post
 	preCount, _ := da.queries.CountEventsInWindow(ctx, db.CountEventsInWindowParams{
-		ProjectID: project.ID,
-		Timestamp: preStart,
+		ProjectID:   project.ID,
+		Timestamp:   preStart,
 		Timestamp_2: preEnd,
 	})
 	postCount, _ := da.queries.CountEventsInWindow(ctx, db.CountEventsInWindowParams{
-		ProjectID: project.ID,
-		Timestamp: postStart,
+		ProjectID:   project.ID,
+		Timestamp:   postStart,
 		Timestamp_2: postEnd,
 	})
 
@@ -116,18 +123,18 @@ func (da *DeployAnalyzer) analyzeDeploy(ctx context.Context, project db.Project,
 	// Reopened issues since deploy
 	reopenedIssues, _ := da.queries.ListIssuesReopenedSince(ctx, db.ListIssuesReopenedSinceParams{
 		ProjectID: project.ID,
-		LastSeen: deploy.DeployedAt,
+		LastSeen:  deploy.DeployedAt,
 	})
 
 	// Find spiked issues: compare per-issue event counts pre vs post
 	preIssueCounts, _ := da.queries.CountEventsPerIssueInWindow(ctx, db.CountEventsPerIssueInWindowParams{
-		ProjectID: project.ID,
-		Timestamp: preStart,
+		ProjectID:   project.ID,
+		Timestamp:   preStart,
 		Timestamp_2: preEnd,
 	})
 	postIssueCounts, _ := da.queries.CountEventsPerIssueInWindow(ctx, db.CountEventsPerIssueInWindowParams{
-		ProjectID: project.ID,
-		Timestamp: postStart,
+		ProjectID:   project.ID,
+		Timestamp:   postStart,
 		Timestamp_2: postEnd,
 	})
 
@@ -148,11 +155,11 @@ func (da *DeployAnalyzer) analyzeDeploy(ctx context.Context, project db.Project,
 	// If no anomalies, store analysis with severity=none and skip AI
 	if len(newIssues) == 0 && len(spiked) == 0 && len(reopenedIssues) == 0 {
 		da.queries.CreateDeployAnalysis(ctx, db.CreateDeployAnalysisParams{
-			DeployID:            deploy.ID,
-			ProjectID:           project.ID,
-			Severity:            "none",
-			Summary:             "No anomalies detected after deploy",
-			RecommendedAction:   "monitor",
+			DeployID:          deploy.ID,
+			ProjectID:         project.ID,
+			Severity:          "none",
+			Summary:           "No anomalies detected after deploy",
+			RecommendedAction: "monitor",
 		})
 		slog.Info("ai deploy: no anomalies", "project", project.ID, "deploy", deploy.ID)
 		return
@@ -224,7 +231,9 @@ func (da *DeployAnalyzer) buildDeployPrompt(deploy db.Deploy, preCount, postCoun
 	if len(newIssues) > 0 {
 		sb.WriteString(fmt.Sprintf("\nNew issues since deploy (%d):\n", len(newIssues)))
 		for i, iss := range newIssues {
-			if i >= 10 { break }
+			if i >= 10 {
+				break
+			}
 			sb.WriteString(fmt.Sprintf("  - [%s] %s (events: %d)\n", iss.Level, iss.Title, iss.EventCount))
 		}
 	}
@@ -239,7 +248,9 @@ func (da *DeployAnalyzer) buildDeployPrompt(deploy db.Deploy, preCount, postCoun
 	if len(reopened) > 0 {
 		sb.WriteString(fmt.Sprintf("\nReopened issues (%d):\n", len(reopened)))
 		for i, iss := range reopened {
-			if i >= 10 { break }
+			if i >= 10 {
+				break
+			}
 			sb.WriteString(fmt.Sprintf("  - [%s] %s\n", iss.Level, iss.Title))
 		}
 	}
@@ -272,4 +283,3 @@ type deployAnalysisResponse struct {
 	LikelyCausedByDeploy bool   `json:"likely_caused_by_deploy"`
 	RecommendedAction    string `json:"recommended_action"`
 }
-

@@ -51,48 +51,10 @@ type ProjectSettings struct {
 	RouteGroupingEnabled bool
 }
 
-func legacySettingsFromProject(p db.Project) ProjectSettings {
-	return ProjectSettings{
-		WarningAsError:       p.WarningAsError,
-		MaxEventsPerIssue:    p.MaxEventsPerIssue,
-		IssueDisplayMode:     p.IssueDisplayMode,
-		ErrorGroupingMode:    p.InfoGroupingMode,
-		WarningGroupingMode:  p.InfoGroupingMode,
-		InfoGroupingMode:     p.InfoGroupingMode,
-		MaxInfoIssues:        p.MaxInfoIssues,
-		JiraBaseURL:          p.JiraBaseUrl,
-		JiraEmail:            p.JiraEmail,
-		JiraAPIToken:         p.JiraApiToken,
-		JiraProjectKey:       p.JiraProjectKey,
-		JiraIssueType:        p.JiraIssueType,
-		GithubToken:          p.GithubToken,
-		GithubOwner:          p.GithubOwner,
-		GithubRepo:           p.GithubRepo,
-		GithubLabels:         p.GithubLabels,
-		RepoProvider:         p.RepoProvider,
-		RepoOwner:            p.RepoOwner,
-		RepoName:             p.RepoName,
-		RepoDefaultBranch:    p.RepoDefaultBranch,
-		RepoToken:            p.RepoToken,
-		RepoPathStrip:        p.RepoPathStrip,
-		AIEnabled:            p.AiEnabled,
-		AIModel:              p.AiModel,
-		AIMergeSuggestions:   p.AiMergeSuggestions,
-		AIAutoMerge:          p.AiAutoMerge,
-		AIAnomalyDetection:   p.AiAnomalyDetection,
-		AITicketDescription:  p.AiTicketDescription,
-		AIRootCause:          p.AiRootCause,
-		AITriage:             p.AiTriage,
-		StacktraceRules:      p.StacktraceRules,
-		AnalysisDBEnabled:    p.AnalysisDbEnabled,
-		AnalysisDBDriver:     p.AnalysisDbDriver,
-		AnalysisDBDSN:        p.AnalysisDbDsn,
-		AnalysisDBName:       p.AnalysisDbName,
-		AnalysisDBSchema:     p.AnalysisDbSchema,
-		AnalysisDBNotes:      p.AnalysisDbNotes,
-		Framework:            "generic",
-		RouteGroupingEnabled: false,
-	}
+func DefaultProjectSettings() ProjectSettings {
+	var s ProjectSettings
+	s.normalizeDefaults()
+	return s
 }
 
 func (s *ProjectSettings) normalizeDefaults() {
@@ -129,7 +91,7 @@ func (s *ProjectSettings) normalizeDefaults() {
 }
 
 func loadProjectSettings(ctx context.Context, queries *db.Queries, p db.Project) (ProjectSettings, error) {
-	out := legacySettingsFromProject(p)
+	out := DefaultProjectSettings()
 	rawdb := queries.RawDB()
 
 	if err := rawdb.QueryRowContext(ctx, `
@@ -242,10 +204,26 @@ func loadProjectSettings(ctx context.Context, queries *db.Queries, p db.Project)
 	return out, nil
 }
 
+func LoadSettings(ctx context.Context, queries *db.Queries, p db.Project) (ProjectSettings, error) {
+	return loadProjectSettings(ctx, queries, p)
+}
+
+func LoadSettingsByProjectID(ctx context.Context, queries *db.Queries, projectID uuid.UUID) (db.Project, ProjectSettings, error) {
+	p, err := queries.GetProject(ctx, projectID)
+	if err != nil {
+		return db.Project{}, ProjectSettings{}, err
+	}
+	settings, err := loadProjectSettings(ctx, queries, p)
+	if err != nil {
+		return db.Project{}, ProjectSettings{}, err
+	}
+	return p, settings, nil
+}
+
 func loadProjectSettingsMap(ctx context.Context, queries *db.Queries, projects []db.Project) (map[uuid.UUID]ProjectSettings, error) {
 	result := make(map[uuid.UUID]ProjectSettings, len(projects))
 	for _, p := range projects {
-		result[p.ID] = legacySettingsFromProject(p)
+		result[p.ID] = DefaultProjectSettings()
 	}
 
 	rawdb := queries.RawDB()
@@ -475,6 +453,10 @@ func loadProjectSettingsMap(ctx context.Context, queries *db.Queries, projects [
 	}
 
 	return result, nil
+}
+
+func LoadSettingsMap(ctx context.Context, queries *db.Queries, projects []db.Project) (map[uuid.UUID]ProjectSettings, error) {
+	return loadProjectSettingsMap(ctx, queries, projects)
 }
 
 func saveProjectSettings(ctx context.Context, queries *db.Queries, projectID uuid.UUID, s ProjectSettings) error {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 )
 
@@ -17,12 +18,12 @@ func CheckAndCreateIssue(ctx context.Context, queries *db.Queries, baseURL strin
 		return
 	}
 
-	project, err := queries.GetProject(ctx, projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(ctx, queries, projectID)
 	if err != nil {
 		return
 	}
 
-	cfg := ConfigFromProject(project)
+	cfg := ConfigFromSettings(settings)
 	if !cfg.IsConfigured() {
 		return
 	}
@@ -44,7 +45,7 @@ func CheckAndCreateIssue(ctx context.Context, queries *db.Queries, baseURL strin
 		Level:       issue.Level,
 		Platform:    issue.Platform,
 		EventCount:  issue.EventCount,
-		HasAppFrame: conditions.HasAppFrame(eventData, project.StacktraceRules),
+		HasAppFrame: conditions.HasAppFrame(eventData, settings.StacktraceRules),
 	}, string(eventData), &githubLoader{queries: queries, ctx: ctx})
 
 	for _, rule := range rules {

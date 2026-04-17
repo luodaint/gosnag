@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 )
 
 // Config holds Jira connection settings from a project.
@@ -21,14 +22,13 @@ type Config struct {
 	IssueType  string
 }
 
-// ConfigFromProject extracts Jira config from a project.
-func ConfigFromProject(p db.Project) Config {
+func ConfigFromSettings(settings projectcfg.ProjectSettings) Config {
 	return Config{
-		BaseURL:    strings.TrimRight(p.JiraBaseUrl, "/"),
-		Email:      p.JiraEmail,
-		APIToken:   p.JiraApiToken,
-		ProjectKey: p.JiraProjectKey,
-		IssueType:  p.JiraIssueType,
+		BaseURL:    strings.TrimRight(settings.JiraBaseURL, "/"),
+		Email:      settings.JiraEmail,
+		APIToken:   settings.JiraAPIToken,
+		ProjectKey: settings.JiraProjectKey,
+		IssueType:  settings.JiraIssueType,
 	}
 }
 

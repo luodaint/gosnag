@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -175,27 +176,15 @@ func (h *Handler) ExplainIssueQuery(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) loadDBConfig(ctx context.Context, p db.Project) (dbConfig, error) {
+func loadDBConfig(settings projectcfg.ProjectSettings) dbConfig {
 	cfg := dbConfig{
-		Enabled: p.AnalysisDbEnabled,
-		Driver:  normalizeDriver(p.AnalysisDbDriver),
-		DSN:     strings.TrimSpace(p.AnalysisDbDsn),
-	}
-
-	err := h.queries.RawDB().QueryRowContext(ctx, `
-		SELECT enabled, driver, dsn
-		FROM project_db_analysis_settings
-		WHERE project_id = $1
-	`, p.ID).Scan(&cfg.Enabled, &cfg.Driver, &cfg.DSN)
-	if err == sql.ErrNoRows {
-		return cfg, nil
-	}
-	if err != nil {
-		return cfg, err
+		Enabled: settings.AnalysisDBEnabled,
+		Driver:  normalizeDriver(settings.AnalysisDBDriver),
+		DSN:     strings.TrimSpace(settings.AnalysisDBDSN),
 	}
 	cfg.Driver = normalizeDriver(cfg.Driver)
 	cfg.DSN = strings.TrimSpace(cfg.DSN)
-	return cfg, nil
+	return cfg
 }
 
 type analysisContext struct {
@@ -220,7 +209,7 @@ func (h *Handler) loadAnalysisContext(ctx context.Context, projectIDRaw, issueID
 		return uuid.Nil, uuid.Nil, db.Project{}, db.Issue{}, dbConfig{}, analysisContext{}, analysisError{status: http.StatusBadRequest, msg: "invalid issue id"}
 	}
 
-	projectRow, err := h.queries.GetProject(ctx, projectID)
+	projectRow, settings, err := projectcfg.LoadSettingsByProjectID(ctx, h.queries, projectID)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, db.Project{}, db.Issue{}, dbConfig{}, analysisContext{}, analysisError{status: http.StatusNotFound, msg: "project not found"}
 	}
@@ -229,10 +218,7 @@ func (h *Handler) loadAnalysisContext(ctx context.Context, projectIDRaw, issueID
 		return uuid.Nil, uuid.Nil, db.Project{}, db.Issue{}, dbConfig{}, analysisContext{}, analysisError{status: http.StatusNotFound, msg: "issue not found"}
 	}
 
-	cfg, err := h.loadDBConfig(ctx, projectRow)
-	if err != nil {
-		return uuid.Nil, uuid.Nil, db.Project{}, db.Issue{}, dbConfig{}, analysisContext{}, analysisError{status: http.StatusInternalServerError, msg: "failed to load database analysis settings"}
-	}
+	cfg := loadDBConfig(settings)
 	if !cfg.Enabled {
 		return uuid.Nil, uuid.Nil, db.Project{}, db.Issue{}, dbConfig{}, analysisContext{}, analysisError{status: http.StatusBadRequest, msg: "database analysis is disabled for this project"}
 	}

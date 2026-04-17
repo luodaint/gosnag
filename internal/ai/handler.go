@@ -8,6 +8,7 @@ import (
 
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -43,12 +44,12 @@ func (h *Handler) GenerateTicketDescription(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Verify project has AI enabled
-	project, err := h.queries.GetProject(r.Context(), projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(r.Context(), h.queries, projectID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	if !project.AiEnabled || !project.AiTicketDescription {
+	if !settings.AIEnabled || !settings.AITicketDescription {
 		writeError(w, http.StatusForbidden, "AI ticket description is disabled for this project")
 		return
 	}
@@ -223,12 +224,12 @@ func (h *Handler) AnalyzeIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.queries.GetProject(r.Context(), projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(r.Context(), h.queries, projectID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	if !project.AiEnabled || !project.AiRootCause {
+	if !settings.AIEnabled || !settings.AIRootCause {
 		writeError(w, http.StatusForbidden, "AI root cause analysis is disabled for this project")
 		return
 	}

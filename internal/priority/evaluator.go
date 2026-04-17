@@ -14,6 +14,7 @@ import (
 	"github.com/darkspock/gosnag/internal/ai"
 	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 )
 
@@ -78,10 +79,10 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 
 	// Build shared eval context for the conditions engine
 	loader := &priorityLoader{queries: queries, ctx: ctx, cache: cache}
-	project, err := queries.GetProject(ctx, projectID)
 	stacktraceRules := json.RawMessage(nil)
-	if err == nil {
-		stacktraceRules = project.StacktraceRules
+	if project, settings, err := projectcfg.LoadSettingsByProjectID(ctx, queries, projectID); err == nil {
+		_ = project
+		stacktraceRules = settings.StacktraceRules
 	}
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
 		ID:          issue.ID,
@@ -192,7 +193,7 @@ func EvaluateAll(ctx context.Context, queries *db.Queries, aiService *ai.Service
 	if err != nil || len(rules) == 0 {
 		return 0, err
 	}
-	project, err := queries.GetProject(ctx, projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(ctx, queries, projectID)
 	if err != nil {
 		return 0, err
 	}
@@ -213,7 +214,7 @@ func EvaluateAll(ctx context.Context, queries *db.Queries, aiService *ai.Service
 		if err == nil && len(events) > 0 {
 			eventData = events[0].Data
 		}
-		evaluateWithRules(ctx, queries, aiService, rules, issue, eventData, project.StacktraceRules, onChange)
+		evaluateWithRules(ctx, queries, aiService, rules, issue, eventData, settings.StacktraceRules, onChange)
 		count++
 	}
 	return count, nil
