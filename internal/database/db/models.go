@@ -268,38 +268,12 @@ type Project struct {
 	DefaultCooldownMinutes int32         `json:"default_cooldown_minutes"`
 	CreatedAt              time.Time     `json:"created_at"`
 	UpdatedAt              time.Time     `json:"updated_at"`
-	WarningAsError         bool          `json:"warning_as_error"`
-	JiraBaseUrl            string        `json:"jira_base_url"`
-	JiraEmail              string        `json:"jira_email"`
-	JiraApiToken           string        `json:"jira_api_token"`
-	JiraProjectKey         string        `json:"jira_project_key"`
-	JiraIssueType          string        `json:"jira_issue_type"`
 	GroupID                uuid.NullUUID `json:"group_id"`
-	MaxEventsPerIssue      int32         `json:"max_events_per_issue"`
 	Icon                   string        `json:"icon"`
 	Color                  string        `json:"color"`
 	Position               int32         `json:"position"`
 	NumericID              int32         `json:"numeric_id"`
-	IssueDisplayMode       string        `json:"issue_display_mode"`
-	GithubToken            string        `json:"github_token"`
-	GithubOwner            string        `json:"github_owner"`
-	GithubRepo             string        `json:"github_repo"`
-	GithubLabels           string        `json:"github_labels"`
 	WorkflowMode           string        `json:"workflow_mode"`
-	RepoProvider           string        `json:"repo_provider"`
-	RepoOwner              string        `json:"repo_owner"`
-	RepoName               string        `json:"repo_name"`
-	RepoDefaultBranch      string        `json:"repo_default_branch"`
-	RepoToken              string        `json:"repo_token"`
-	RepoPathStrip          string        `json:"repo_path_strip"`
-	AiEnabled              bool          `json:"ai_enabled"`
-	AiModel                string        `json:"ai_model"`
-	AiMergeSuggestions     bool          `json:"ai_merge_suggestions"`
-	AiAutoMerge            bool          `json:"ai_auto_merge"`
-	AiAnomalyDetection     bool          `json:"ai_anomaly_detection"`
-	AiTicketDescription    bool          `json:"ai_ticket_description"`
-	AiRootCause            bool          `json:"ai_root_cause"`
-	AiTriage               bool          `json:"ai_triage"`
 }
 
 type ProjectFavorite struct {
@@ -309,10 +283,11 @@ type ProjectFavorite struct {
 }
 
 type ProjectGroup struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Position  int32     `json:"position"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                     uuid.UUID `json:"id"`
+	Name                   string    `json:"name"`
+	Position               int32     `json:"position"`
+	CreatedAt              time.Time `json:"created_at"`
+	DefaultSlackWebhookUrl string    `json:"default_slack_webhook_url"`
 }
 
 type ProjectKey struct {

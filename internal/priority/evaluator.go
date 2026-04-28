@@ -14,6 +14,7 @@ import (
 	"github.com/darkspock/gosnag/internal/ai"
 	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 )
 
@@ -76,17 +77,20 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 	// Flatten event data to string for full-text pattern matching
 	eventText := string(eventData)
 
-	// Build searchable text: title + full event data
-	searchText := issue.Title + "\n" + eventText
-
 	// Build shared eval context for the conditions engine
 	loader := &priorityLoader{queries: queries, ctx: ctx, cache: cache}
+	stacktraceRules := json.RawMessage(nil)
+	if project, settings, err := projectcfg.LoadSettingsByProjectID(ctx, queries, projectID); err == nil {
+		_ = project
+		stacktraceRules = settings.StacktraceRules
+	}
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Level:      issue.Level,
-		Platform:   issue.Platform,
-		EventCount: issue.EventCount,
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Level:       issue.Level,
+		Platform:    issue.Platform,
+		EventCount:  issue.EventCount,
+		HasAppFrame: conditions.HasAppFrame(eventData, stacktraceRules),
 	}, eventText, loader)
 
 	score := int32(50) // base score
@@ -96,6 +100,7 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 
 		// New engine: if conditions JSONB is set, use it
 		if rule.Conditions.Valid {
+			slog.Debug("priority: using conditions engine", "rule_id", rule.ID, "rule_name", rule.Name)
 			var group conditions.Group
 			if err := json.Unmarshal(rule.Conditions.RawMessage, &group); err == nil {
 				matched = conditions.Evaluate(group, evalCtx)
@@ -129,12 +134,13 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 
 			case "title_contains":
 				if rule.Pattern != "" {
-					matched = matchesPattern(rule.Pattern, searchText)
+					matched = matchesPattern(rule.Pattern, issue.Title)
+					slog.Debug("priority: title_contains", "rule_id", rule.ID, "pattern", rule.Pattern, "matched", matched, "issue_title", issue.Title)
 				}
 
 			case "title_not_contains":
 				if rule.Pattern != "" {
-					matched = !matchesPattern(rule.Pattern, searchText)
+					matched = !matchesPattern(rule.Pattern, issue.Title)
 				}
 
 			case "level_is":
@@ -163,6 +169,8 @@ func Evaluate(ctx context.Context, queries *db.Queries, aiService *ai.Service, p
 		score = 100
 	}
 
+	slog.Debug("priority: evaluation complete", "issue_id", issue.ID, "issue_title", issue.Title, "current_priority", issue.Priority, "new_score", score)
+
 	// Only update if changed
 	if score != issue.Priority {
 		oldPriority := issue.Priority
@@ -185,6 +193,10 @@ func EvaluateAll(ctx context.Context, queries *db.Queries, aiService *ai.Service
 	if err != nil || len(rules) == 0 {
 		return 0, err
 	}
+	_, settings, err := projectcfg.LoadSettingsByProjectID(ctx, queries, projectID)
+	if err != nil {
+		return 0, err
+	}
 
 	issueIDs, err := queries.ListIssueIDsByProject(ctx, projectID)
 	if err != nil {
@@ -202,24 +214,24 @@ func EvaluateAll(ctx context.Context, queries *db.Queries, aiService *ai.Service
 		if err == nil && len(events) > 0 {
 			eventData = events[0].Data
 		}
-		evaluateWithRules(ctx, queries, aiService, rules, issue, eventData, onChange)
+		evaluateWithRules(ctx, queries, aiService, rules, issue, eventData, settings.StacktraceRules, onChange)
 		count++
 	}
 	return count, nil
 }
 
 // evaluateWithRules scores an issue using pre-loaded rules (avoids reloading per issue).
-func evaluateWithRules(ctx context.Context, queries *db.Queries, aiService *ai.Service, rules []db.PriorityRule, issue db.Issue, eventData json.RawMessage, onChange OnPriorityChange) {
+func evaluateWithRules(ctx context.Context, queries *db.Queries, aiService *ai.Service, rules []db.PriorityRule, issue db.Issue, eventData json.RawMessage, stacktraceRules json.RawMessage, onChange OnPriorityChange) {
 	eventText := string(eventData)
-	searchText := issue.Title + "\n" + eventText
 
 	loader := &priorityLoader{queries: queries, ctx: ctx, cache: cache}
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Level:      issue.Level,
-		Platform:   issue.Platform,
-		EventCount: issue.EventCount,
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Level:       issue.Level,
+		Platform:    issue.Platform,
+		EventCount:  issue.EventCount,
+		HasAppFrame: conditions.HasAppFrame(eventData, stacktraceRules),
 	}, eventText, loader)
 
 	var velocity1h, velocity24h, userCount *int32
@@ -257,11 +269,12 @@ func evaluateWithRules(ctx context.Context, queries *db.Queries, aiService *ai.S
 				matched = compareInt(*userCount, rule.Operator, rule.Threshold)
 			case "title_contains":
 				if rule.Pattern != "" {
-					matched = matchesPattern(rule.Pattern, searchText)
+					matched = matchesPattern(rule.Pattern, issue.Title)
+					slog.Debug("priority: title_contains", "rule_id", rule.ID, "pattern", rule.Pattern, "matched", matched, "issue_title", issue.Title)
 				}
 			case "title_not_contains":
 				if rule.Pattern != "" {
-					matched = !matchesPattern(rule.Pattern, searchText)
+					matched = !matchesPattern(rule.Pattern, issue.Title)
 				}
 			case "level_is":
 				matched = strings.EqualFold(issue.Level, rule.Pattern)

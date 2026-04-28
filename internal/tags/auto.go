@@ -12,6 +12,7 @@ import (
 	"github.com/darkspock/gosnag/internal/ai"
 	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 )
 
@@ -24,16 +25,21 @@ func AutoTag(ctx context.Context, queries *db.Queries, aiService *ai.Service, pr
 	if err != nil || len(rules) == 0 {
 		return
 	}
+	_, settings, err := projectcfg.LoadSettingsByProjectID(ctx, queries, projectID)
+	if err != nil {
+		return
+	}
 
 	searchText := buildSearchText(issue.Title, eventData)
 
 	// Shared eval context for conditions engine (no loader needed — tags don't use velocity/users)
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Level:      issue.Level,
-		Platform:   issue.Platform,
-		EventCount: issue.EventCount,
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Level:       issue.Level,
+		Platform:    issue.Platform,
+		EventCount:  issue.EventCount,
+		HasAppFrame: conditions.HasAppFrame(eventData, settings.StacktraceRules),
 	}, string(eventData), nil)
 
 	for _, rule := range rules {
@@ -221,15 +227,15 @@ func buildSearchText(issueTitle string, eventData json.RawMessage) string {
 
 	// Only include fields relevant for error classification
 	relevantKeys := []string{
-		"exception",    // exception type, value, stacktrace
-		"message",      // log message
-		"logentry",     // structured log entry
-		"transaction",  // transaction/endpoint name
-		"request",      // HTTP request URL, method
-		"breadcrumbs",  // breadcrumb trail
-		"tags",         // SDK-provided tags
-		"extra",        // extra context from SDK
-		"fingerprint",  // custom fingerprint
+		"exception",   // exception type, value, stacktrace
+		"message",     // log message
+		"logentry",    // structured log entry
+		"transaction", // transaction/endpoint name
+		"request",     // HTTP request URL, method
+		"breadcrumbs", // breadcrumb trail
+		"tags",        // SDK-provided tags
+		"extra",       // extra context from SDK
+		"fingerprint", // custom fingerprint
 	}
 
 	for _, key := range relevantKeys {

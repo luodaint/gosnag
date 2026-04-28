@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '@/lib/api'
+import { api, type GlobalToken } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,17 +10,6 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
 import { Copy, Key, Plus, Trash2 } from 'lucide-react'
 import { toast } from '@/lib/use-toast'
-
-interface GlobalToken {
-  id: string
-  name: string
-  permission: string
-  scope: string
-  token?: string
-  last_used_at: string | null
-  expires_at: string | null
-  created_at: string
-}
 
 export default function AdminSettings() {
   const { user } = useAuth()
@@ -33,11 +22,7 @@ export default function AdminSettings() {
   const [showDelete, setShowDelete] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
-    loadTokens()
-  }, [])
-
-  const loadTokens = async () => {
+  async function loadTokens() {
     try {
       const data = await api.listGlobalTokens()
       setTokens(data)
@@ -46,13 +31,26 @@ export default function AdminSettings() {
     }
   }
 
+  useEffect(() => {
+    let cancelled = false
+    void api.listGlobalTokens().then(data => {
+      if (!cancelled) setTokens(data)
+    }).catch(() => {
+      // Not admin or no tokens
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const handleCreate = async () => {
     try {
       const data: Record<string, unknown> = { name: tokenName, permission: tokenPermission }
       if (tokenExpiresIn) data.expires_in = parseInt(tokenExpiresIn)
       const resp = await api.createGlobalToken(data as { name: string; permission: string; expires_in?: number })
       setNewToken(resp.token || null)
-      loadTokens()
+      await loadTokens()
       toast.success('Token created')
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to create token')
@@ -62,7 +60,7 @@ export default function AdminSettings() {
   const handleDelete = async (id: string) => {
     await api.deleteGlobalToken(id)
     setShowDelete(null)
-    loadTokens()
+    await loadTokens()
     toast.success('Token deleted')
   }
 

@@ -52,6 +52,16 @@ WHERE project_id = $1
   AND (sqlc.arg('search')::text = '' OR title ILIKE '%' || sqlc.arg('search')::text || '%')
   AND (sqlc.arg('release_filter')::text = '' OR first_release = sqlc.arg('release_filter')::text);
 
+-- name: HasReachedInfoIssueLimit :one
+SELECT EXISTS (
+  SELECT 1
+  FROM issues
+  WHERE project_id = $1
+    AND level IN ('info', 'debug')
+  OFFSET GREATEST(sqlc.arg('max_info_issues')::int - 1, 0)
+  LIMIT 1
+);
+
 -- name: UpdateIssueStatus :one
 UPDATE issues
 SET status = $2,

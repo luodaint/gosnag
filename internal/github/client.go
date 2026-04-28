@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 )
 
 // Config holds GitHub connection settings from a project.
@@ -20,13 +21,12 @@ type Config struct {
 	Labels string // comma-separated label names
 }
 
-// ConfigFromProject extracts GitHub config from a project.
-func ConfigFromProject(p db.Project) Config {
+func ConfigFromSettings(settings projectcfg.ProjectSettings) Config {
 	return Config{
-		Token:  p.GithubToken,
-		Owner:  p.GithubOwner,
-		Repo:   p.GithubRepo,
-		Labels: p.GithubLabels,
+		Token:  settings.GithubToken,
+		Owner:  settings.GithubOwner,
+		Repo:   settings.GithubRepo,
+		Labels: settings.GithubLabels,
 	}
 }
 

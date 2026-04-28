@@ -4,34 +4,37 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"path"
+	"regexp"
 	"strings"
 )
 
 // SentryEvent represents the JSON structure sent by Sentry SDKs.
 type SentryEvent struct {
-	EventID     string                 `json:"event_id"`
-	Timestamp   any                    `json:"timestamp"` // string or float
-	Platform    string                 `json:"platform"`
-	Level       string                 `json:"level"`
-	Logger      string                 `json:"logger"`
-	Transaction string                 `json:"transaction"`
-	ServerName  string                 `json:"server_name"`
-	Release     string                 `json:"release"`
-	Dist        string                 `json:"dist"`
-	Environment string                 `json:"environment"`
-	Message     string                 `json:"message"`
-	Logentry    *LogEntry              `json:"logentry"`
-	Exception   *ExceptionData         `json:"exception"`
-	Tags        map[string]string      `json:"tags"`
-	Extra       map[string]any         `json:"extra"`
-	Fingerprint []string               `json:"fingerprint"`
-	User        map[string]any         `json:"user"`
-	Request     map[string]any         `json:"request"`
-	Contexts    map[string]any         `json:"contexts"`
-	Breadcrumbs json.RawMessage         `json:"breadcrumbs"`
-	SDK         map[string]any         `json:"sdk"`
-	Modules     map[string]string      `json:"modules"`
-	Raw         map[string]any         `json:"-"` // full raw event for storage
+	EventID     string            `json:"event_id"`
+	Timestamp   any               `json:"timestamp"` // string or float
+	Platform    string            `json:"platform"`
+	Level       string            `json:"level"`
+	Logger      string            `json:"logger"`
+	Transaction string            `json:"transaction"`
+	ServerName  string            `json:"server_name"`
+	Release     string            `json:"release"`
+	Dist        string            `json:"dist"`
+	Environment string            `json:"environment"`
+	Message     string            `json:"message"`
+	Logentry    *LogEntry         `json:"logentry"`
+	Exception   *ExceptionData    `json:"exception"`
+	Tags        map[string]string `json:"tags"`
+	Extra       map[string]any    `json:"extra"`
+	Fingerprint []string          `json:"fingerprint"`
+	User        map[string]any    `json:"user"`
+	Request     map[string]any    `json:"request"`
+	Contexts    map[string]any    `json:"contexts"`
+	Breadcrumbs json.RawMessage   `json:"breadcrumbs"`
+	SDK         map[string]any    `json:"sdk"`
+	Modules     map[string]string `json:"modules"`
+	Raw         map[string]any    `json:"-"` // full raw event for storage
 }
 
 type LogEntry struct {
@@ -118,6 +121,9 @@ func (e *SentryEvent) Title() string {
 
 	return "(no message)"
 }
+
+// IssueTitle returns the normalized issue title used for grouping.
+func (e *SentryEvent) IssueTitle() string { return e.Title() }
 
 // Culprit returns a concise location string like "POST /api/v2/bookings".
 func (e *SentryEvent) Culprit() string {
@@ -212,4 +218,231 @@ func (e *SentryEvent) defaultFingerprint() string {
 	// Last resort: hash event_id (each event is its own issue)
 	hasher.Write([]byte(e.EventID))
 	return fmt.Sprintf("%x", hasher.Sum(nil))[:32]
+}
+
+type groupingHint struct {
+	FingerprintKey string
+	Title          string
+	Culprit        string
+}
+
+func (e *SentryEvent) groupingMessage() string {
+	if e.Logentry != nil {
+		if e.Logentry.Formatted != "" {
+			return e.Logentry.Formatted
+		}
+		if e.Logentry.Message != "" {
+			return e.Logentry.Message
+		}
+	}
+	return e.Message
+}
+
+func parseMethodAndPathFromMessage(source string) (string, string) {
+	for _, line := range strings.Split(source, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "URL:") {
+			continue
+		}
+
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "URL:"))
+		if rest == "" {
+			continue
+		}
+
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			continue
+		}
+
+		if len(fields) == 1 {
+			return "", normalizeURLPath(fields[0])
+		}
+
+		method := strings.ToUpper(fields[0])
+		path := normalizeURLPath(fields[1])
+		if path != "" {
+			return method, path
+		}
+	}
+
+	firstLine, _, _ := strings.Cut(source, "\n")
+	if idx := strings.LastIndex(firstLine, " — "); idx >= 0 {
+		if path := normalizeURLPath(strings.TrimSpace(firstLine[idx+len(" — "):])); path != "" {
+			return "", path
+		}
+	}
+	if idx := strings.LastIndex(firstLine, " - "); idx >= 0 {
+		if path := normalizeURLPath(strings.TrimSpace(firstLine[idx+len(" - "):])); path != "" {
+			return "", path
+		}
+	}
+
+	return "", ""
+}
+
+func normalizeURLPath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	if u, err := url.Parse(raw); err == nil {
+		if u.Path != "" {
+			return normalizeRoutePath(u.Path)
+		}
+	}
+
+	if idx := strings.IndexAny(raw, "?#"); idx >= 0 {
+		raw = raw[:idx]
+	}
+	if strings.HasPrefix(raw, "/") {
+		return normalizeRoutePath(raw)
+	}
+
+	return ""
+}
+
+func normalizeRoutePath(raw string) string {
+	cleaned := path.Clean(raw)
+	if cleaned == "." || cleaned == "" {
+		return "/"
+	}
+
+	segments := strings.Split(cleaned, "/")
+	for i := range segments {
+		if segments[i] == "" {
+			continue
+		}
+		segments[i] = normalizeRouteSegment(segments[i])
+	}
+
+	normalized := strings.Join(segments, "/")
+	if !strings.HasPrefix(normalized, "/") {
+		normalized = "/" + normalized
+	}
+	return normalized
+}
+
+var (
+	uuidSegmentRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	dateSegmentRe = regexp.MustCompile(`^\d{4}-\d{1,2}-\d{1,2}$`)
+	intSegmentRe  = regexp.MustCompile(`^\d+$`)
+	hexTokenRe    = regexp.MustCompile(`(?i)^[0-9a-f]{8,}$`)
+	opaqueTokenRe = regexp.MustCompile(`^[A-Za-z0-9_-]{16,}$`)
+)
+
+func normalizeRouteSegment(segment string) string {
+	switch {
+	case uuidSegmentRe.MatchString(segment):
+		return ":uuid"
+	case dateSegmentRe.MatchString(segment):
+		return ":date"
+	case intSegmentRe.MatchString(segment):
+		if len(segment) == 4 && (strings.HasPrefix(segment, "19") || strings.HasPrefix(segment, "20")) {
+			return ":year"
+		}
+		return ":int"
+	case hexTokenRe.MatchString(segment):
+		return ":id"
+	case opaqueTokenRe.MatchString(segment):
+		return ":token"
+	default:
+		return segment
+	}
+}
+
+func hashFingerprintKey(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", sum)[:32]
+}
+
+func (e *SentryEvent) URLGroupingHint() (groupingHint, bool) {
+	method, path := e.requestMethodAndPath()
+	if path == "" {
+		return groupingHint{}, false
+	}
+
+	culprit := path
+	fingerprintKey := "info:url|" + path
+	if method != "" {
+		culprit = method + " " + path
+		fingerprintKey = "info:url|" + method + "|" + path
+	}
+
+	return groupingHint{
+		FingerprintKey: fingerprintKey,
+		Title:          e.groupingTitleFromKey(culprit),
+		Culprit:        culprit,
+	}, true
+}
+
+func (e *SentryEvent) FileGroupingHint() (groupingHint, bool) {
+	filename := e.groupingFilename()
+	if filename == "" {
+		return groupingHint{}, false
+	}
+
+	return groupingHint{
+		FingerprintKey: "info:file|" + filename,
+		Title:          e.groupingTitleFromKey(path.Base(filename)),
+		Culprit:        filename,
+	}, true
+}
+
+func (e *SentryEvent) groupingTitleFromKey(key string) string {
+	if e.Exception != nil && len(e.Exception.Values) > 0 {
+		last := e.Exception.Values[len(e.Exception.Values)-1]
+		if last.Type != "" {
+			return last.Type + ": " + key
+		}
+	}
+	return key
+}
+
+func (e *SentryEvent) requestMethodAndPath() (string, string) {
+	if e.Request != nil {
+		method, _ := e.Request["method"].(string)
+		if rawURL, _ := e.Request["url"].(string); rawURL != "" {
+			if normalized := normalizeURLPath(rawURL); normalized != "" {
+				return strings.ToUpper(strings.TrimSpace(method)), normalized
+			}
+		}
+	}
+
+	method, path := parseMethodAndPathFromMessage(e.groupingMessage())
+	return strings.ToUpper(strings.TrimSpace(method)), path
+}
+
+func (e *SentryEvent) HasExceptionStacktrace() bool {
+	if e.Exception == nil {
+		return false
+	}
+	for _, exc := range e.Exception.Values {
+		if exc.Stacktrace != nil && len(exc.Stacktrace.Frames) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *SentryEvent) groupingFilename() string {
+	if e.Exception == nil || len(e.Exception.Values) == 0 {
+		return ""
+	}
+
+	last := e.Exception.Values[len(e.Exception.Values)-1]
+	if last.Stacktrace == nil || len(last.Stacktrace.Frames) == 0 {
+		return ""
+	}
+
+	for i := len(last.Stacktrace.Frames) - 1; i >= 0; i-- {
+		frame := last.Stacktrace.Frames[i]
+		if frame.InApp != nil && *frame.InApp && frame.Filename != "" {
+			return frame.Filename
+		}
+	}
+
+	innermost := last.Stacktrace.Frames[len(last.Stacktrace.Frames)-1]
+	return innermost.Filename
 }

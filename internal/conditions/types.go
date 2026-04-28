@@ -1,6 +1,9 @@
 package conditions
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Group represents an AND/OR group of conditions, optionally nested.
 type Group struct {
@@ -67,4 +70,22 @@ func (n Node) StringSliceValue() []string {
 		return []string{s}
 	}
 	return nil
+}
+
+// BoolValue extracts a bool value from the JSON.
+func (n Node) BoolValue() bool {
+	var b bool
+	if err := json.Unmarshal(n.Value, &b); err == nil {
+		return b
+	}
+
+	var s string
+	if err := json.Unmarshal(n.Value, &s); err == nil {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "true", "1", "yes":
+			return true
+		}
+	}
+
+	return false
 }

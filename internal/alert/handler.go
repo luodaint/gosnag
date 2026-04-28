@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -62,6 +63,34 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toSafeAlerts(configs))
 }
 
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	projectID, err := uuid.Parse(chi.URLParam(r, "project_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid project id")
+		return
+	}
+	alertID, err := uuid.Parse(chi.URLParam(r, "alert_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid alert id")
+		return
+	}
+
+	configs, err := h.queries.ListAlertConfigs(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load alert config")
+		return
+	}
+
+	for _, config := range configs {
+		if config.ID == alertID {
+			writeJSON(w, http.StatusOK, toFullAlert(config))
+			return
+		}
+	}
+
+	writeError(w, http.StatusNotFound, "alert config not found")
+}
+
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	projectID, err := uuid.Parse(chi.URLParam(r, "project_id"))
 	if err != nil {
@@ -82,7 +111,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := validateAlertConfig(req.AlertType, req.Config); err != nil {
+	projectHasGroupDefaultSlack, err := h.projectHasGroupDefaultSlackWebhook(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project")
+		return
+	}
+
+	if err := validateAlertConfig(req.AlertType, req.Config, projectHasGroupDefaultSlack); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -125,28 +160,42 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	projectHasGroupDefaultSlack, err := h.projectHasGroupDefaultSlackWebhook(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project")
+		return
+	}
+
 	// Look up existing to get alert_type for config validation
 	existing, err := h.queries.ListAlertConfigs(r.Context(), projectID)
-	if err == nil {
-		for _, a := range existing {
-			if a.ID == alertID {
-				if err := validateAlertConfig(a.AlertType, req.Config); err != nil {
-					writeError(w, http.StatusBadRequest, err.Error())
-					return
-				}
-				break
-			}
-		}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load alert configs")
+		return
 	}
 
 	// For Slack alerts, preserve existing webhook_url if not provided in the request
 	// (the API redacts webhook_url on read, so clients may send updates without it)
 	finalConfig := req.Config
+	alertType := ""
 	for _, a := range existing {
-		if a.ID == alertID && a.AlertType == "slack" {
-			finalConfig = preserveSlackWebhook(a.Config, req.Config)
-			break
+		if a.ID != alertID {
+			continue
 		}
+		alertType = a.AlertType
+		if a.AlertType == "slack" {
+			finalConfig = preserveSlackWebhook(a.Config, req.Config)
+		}
+		break
+	}
+
+	if alertType == "" {
+		writeError(w, http.StatusNotFound, "alert config not found")
+		return
+	}
+
+	if err := validateAlertConfig(alertType, finalConfig, projectHasGroupDefaultSlack); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	config, err := h.queries.UpdateAlertConfig(r.Context(), db.UpdateAlertConfigParams{
@@ -255,6 +304,11 @@ func (h *Handler) SuggestAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	slackCtx := ""
+	if ok, _ := h.projectHasGroupDefaultSlackWebhook(r.Context(), projectID); ok {
+		slackCtx = "\n## Slack Defaults\nThis project's group has a shared Slack webhook configured. Slack alerts may be created without a per-alert webhook_url and will inherit the group default.\n"
+	}
+
 	systemPrompt := fmt.Sprintf(`You are an AI assistant that helps configure alert rules for an error tracking system.
 Alerts notify teams via email or Slack when issues match certain conditions.
 
@@ -296,7 +350,7 @@ When suggesting alerts, respond with valid JSON in this exact format:
 
 Keep suggestions practical. Suggest email alerts by default unless the user mentions Slack.
 
-%s%s`, alertsCtx.String(), issuesCtx.String())
+%s%s%s`, alertsCtx.String(), issuesCtx.String(), slackCtx)
 
 	resp, err := h.aiService.ThinkingChat(r.Context(), projectID, "alert_suggest", ai.ChatRequest{
 		SystemPrompt: systemPrompt,
@@ -317,7 +371,23 @@ Keep suggestions practical. Suggest email alerts by default unless the user ment
 	w.Write([]byte(content))
 }
 
-func validateAlertConfig(alertType string, raw json.RawMessage) error {
+func (h *Handler) projectHasGroupDefaultSlackWebhook(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	project, err := h.queries.GetProject(ctx, projectID)
+	if err != nil {
+		return false, err
+	}
+	if !project.GroupID.Valid {
+		return false, nil
+	}
+
+	group, err := h.queries.GetProjectGroup(ctx, project.GroupID.UUID)
+	if err != nil {
+		return false, nil
+	}
+	return strings.TrimSpace(group.DefaultSlackWebhookUrl) != "", nil
+}
+
+func validateAlertConfig(alertType string, raw json.RawMessage, allowSlackWebhookFallback bool) error {
 	switch alertType {
 	case "email":
 		var cfg struct {
@@ -336,7 +406,7 @@ func validateAlertConfig(alertType string, raw json.RawMessage) error {
 		if err := json.Unmarshal(raw, &cfg); err != nil {
 			return fmt.Errorf("invalid slack config: %w", err)
 		}
-		if cfg.WebhookURL == "" {
+		if strings.TrimSpace(cfg.WebhookURL) == "" && !allowSlackWebhookFallback {
 			return fmt.Errorf("webhook URL is required")
 		}
 	}
@@ -349,6 +419,29 @@ func toSafeAlert(a db.AlertConfig) map[string]any {
 		"project_id":      a.ProjectID,
 		"alert_type":      a.AlertType,
 		"config":          redactAlertConfig(a.AlertType, a.Config),
+		"enabled":         a.Enabled,
+		"level_filter":    a.LevelFilter,
+		"title_pattern":   a.TitlePattern,
+		"min_events":      a.MinEvents,
+		"min_velocity_1h": a.MinVelocity1h,
+		"exclude_pattern": a.ExcludePattern,
+		"created_at":      a.CreatedAt,
+		"updated_at":      a.UpdatedAt,
+	}
+	if a.Conditions.Valid {
+		m["conditions"] = a.Conditions.RawMessage
+	} else {
+		m["conditions"] = nil
+	}
+	return m
+}
+
+func toFullAlert(a db.AlertConfig) map[string]any {
+	m := map[string]any{
+		"id":              a.ID,
+		"project_id":      a.ProjectID,
+		"alert_type":      a.AlertType,
+		"config":          a.Config,
 		"enabled":         a.Enabled,
 		"level_filter":    a.LevelFilter,
 		"title_pattern":   a.TitlePattern,

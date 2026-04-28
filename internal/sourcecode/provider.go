@@ -5,13 +5,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 )
 
 // Provider abstracts source code hosting operations.
 type Provider interface {
 	// FileURL returns a direct link to a file and line in the repository.
 	FileURL(path string, line int, commitOrBranch string) string
+
+	// GetFile returns raw file contents for a repository path at a given ref.
+	GetFile(ctx context.Context, path string, ref string) ([]byte, error)
 
 	// GetCommitsForFiles returns recent commits that touched any of the given files.
 	GetCommitsForFiles(ctx context.Context, files []string, since time.Time) ([]Commit, error)
@@ -43,15 +46,14 @@ type Config struct {
 	PathStrip     string
 }
 
-// ConfigFromProject extracts source code config from a project.
-func ConfigFromProject(p db.Project) Config {
+func ConfigFromSettings(settings projectcfg.ProjectSettings) Config {
 	return Config{
-		Provider:      p.RepoProvider,
-		Owner:         p.RepoOwner,
-		Name:          p.RepoName,
-		DefaultBranch: p.RepoDefaultBranch,
-		Token:         p.RepoToken,
-		PathStrip:     p.RepoPathStrip,
+		Provider:      settings.RepoProvider,
+		Owner:         settings.RepoOwner,
+		Name:          settings.RepoName,
+		DefaultBranch: settings.RepoDefaultBranch,
+		Token:         settings.RepoToken,
+		PathStrip:     settings.RepoPathStrip,
 	}
 }
 
@@ -70,6 +72,15 @@ func NewProvider(cfg Config) Provider {
 	default:
 		return nil
 	}
+}
+
+// NewImportProvider returns the best available provider for static source imports.
+// It prefers configured remote providers and falls back to a local checkout when present.
+func NewImportProvider(cfg Config) Provider {
+	if provider := NewProvider(cfg); provider != nil && cfg.IsConfigured() {
+		return provider
+	}
+	return NewLocalProvider(cfg)
 }
 
 // StripPath removes the configured prefix from a runtime file path.

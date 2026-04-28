@@ -24,7 +24,7 @@ export interface ConditionGroup {
 
 interface ConditionTypeInfo {
   label: string
-  category: 'string' | 'number' | 'text'
+  category: 'string' | 'number' | 'text' | 'boolean'
   operators: { value: string; label: string }[]
 }
 
@@ -133,6 +133,14 @@ const CONDITION_TYPES: Record<string, ConditionTypeInfo> = {
       { value: 'lte', label: '<=' },
       { value: 'lt', label: '<' },
       { value: 'eq', label: '=' },
+    ],
+  },
+  has_app_frame: {
+    label: 'Has application frame',
+    category: 'boolean',
+    operators: [
+      { value: 'eq', label: 'is' },
+      { value: 'neq', label: 'is not' },
     ],
   },
 }
@@ -273,7 +281,7 @@ function LeafCondition({
   const handleTypeChange = (newType: string) => {
     const info = CONDITION_TYPES[newType]
     const firstOp = info?.operators[0]?.value || 'eq'
-    onChange({ type: newType, op: firstOp, value: '' })
+    onChange({ type: newType, op: firstOp, value: info?.category === 'boolean' ? true : '' })
   }
 
   const handleOpChange = (newOp: string) => {
@@ -283,6 +291,8 @@ function LeafCondition({
   const handleValueChange = (val: string) => {
     if (typeInfo?.category === 'number') {
       onChange({ ...node, value: val === '' ? '' : Number(val) })
+    } else if (typeInfo?.category === 'boolean') {
+      onChange({ ...node, value: val === 'true' })
     } else if (node.op === 'in' || node.op === 'not_in') {
       onChange({ ...node, value: val.split(',').map(s => s.trim()).filter(Boolean) })
     } else {
@@ -327,17 +337,28 @@ function LeafCondition({
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
-      <Input
-        value={displayValue()}
-        onChange={(e) => handleValueChange(e.target.value)}
-        placeholder={
-          typeInfo?.category === 'number' ? 'e.g. 10'
-          : (node.op === 'in' || node.op === 'not_in') ? 'e.g. error, fatal (comma separated)'
-          : 'e.g. pattern or regex'
-        }
-        className="w-full text-xs"
-        type={typeInfo?.category === 'number' ? 'number' : 'text'}
-      />
+      {typeInfo?.category === 'boolean' ? (
+        <Select
+          value={String(node.value ?? true)}
+          onChange={(e) => handleValueChange(e.target.value)}
+          className="w-full text-xs"
+        >
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </Select>
+      ) : (
+        <Input
+          value={displayValue()}
+          onChange={(e) => handleValueChange(e.target.value)}
+          placeholder={
+            typeInfo?.category === 'number' ? 'e.g. 10'
+            : (node.op === 'in' || node.op === 'not_in') ? 'e.g. error, fatal (comma separated)'
+            : 'e.g. pattern or regex'
+          }
+          className="w-full text-xs"
+          type={typeInfo?.category === 'number' ? 'number' : 'text'}
+        />
+      )}
     </div>
   )
 }

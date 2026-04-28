@@ -12,6 +12,7 @@ import (
 	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 )
 
@@ -100,10 +101,19 @@ func (s *Service) Notify(projectID uuid.UUID, issue db.Issue, isNew bool) {
 		return
 	}
 
-	project, err := s.queries.GetProject(ctx, projectID)
+	project, settings, err := projectcfg.LoadSettingsByProjectID(ctx, s.queries, projectID)
 	if err != nil {
 		slog.Error("failed to get project for alert", "error", err, "project_id", projectID)
 		return
+	}
+	groupSlackWebhookURL := ""
+	if project.GroupID.Valid {
+		group, err := s.queries.GetProjectGroup(ctx, project.GroupID.UUID)
+		if err != nil {
+			slog.Warn("failed to get project group for alert", "error", err, "project_id", projectID, "group_id", project.GroupID.UUID)
+		} else {
+			groupSlackWebhookURL = group.DefaultSlackWebhookUrl
+		}
 	}
 
 	action := "New issue"
@@ -113,14 +123,16 @@ func (s *Service) Notify(projectID uuid.UUID, issue db.Issue, isNew bool) {
 
 	// Build a shared eval context (lazy-loads velocity/user_count on demand)
 	loader := &dbLoader{queries: s.queries, ctx: ctx}
+	eventData := conditions.LoadLatestEventData(ctx, s.queries, issue.ID)
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Level:      issue.Level,
-		Platform:   issue.Platform,
-		EventCount: issue.EventCount,
-		Priority:   issue.Priority,
-	}, "", loader)
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Level:       issue.Level,
+		Platform:    issue.Platform,
+		EventCount:  issue.EventCount,
+		Priority:    issue.Priority,
+		HasAppFrame: conditions.HasAppFrame(eventData, settings.StacktraceRules),
+	}, string(eventData), loader)
 
 	for _, ac := range configs {
 		// New engine: if conditions JSONB is set, use it
@@ -159,6 +171,9 @@ func (s *Service) Notify(projectID uuid.UUID, issue db.Issue, isNew bool) {
 			if err := json.Unmarshal(ac.Config, &slackCfg); err != nil {
 				slog.Error("invalid slack alert config", "error", err)
 				continue
+			}
+			if strings.TrimSpace(slackCfg.WebhookURL) == "" {
+				slackCfg.WebhookURL = groupSlackWebhookURL
 			}
 			go s.sendSlack(slackCfg, project, issue, action)
 		}

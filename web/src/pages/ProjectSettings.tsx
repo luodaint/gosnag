@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type TagSuggestion, type AIUsage, type RuleSuggestion } from '@/lib/api'
+import { api, type ProjectWithDSN, type AlertConfig, type AlertSuggestion, type APIToken, type JiraRule, type GithubRule, type ProjectGroup, type PriorityRule, type TagRule, type TagSuggestion, type AIUsage, type RuleSuggestion, type RouteRule, type RouteRuleInput, type StacktraceRules } from '@/lib/api'
 import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,10 +10,11 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
-import { Bell, Brain, Check, Copy, Gauge, Key, Loader2, Pencil, Plus, Send, Settings, ShieldAlert, Sparkles, Tag, Trash2, X, Workflow } from 'lucide-react'
+import { Bell, Brain, Check, Copy, Gauge, Key, Loader2, Pencil, Plus, Send, Settings, ShieldAlert, Sparkles, Tag, Trash2, X, Workflow, Bug } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/use-toast'
 import { ConditionBuilder, type ConditionGroup, type ConditionNode } from '@/components/ui/condition-builder'
+import { buildStacktraceRulesPreset, normalizeStacktraceRules, STACKTRACE_RULE_PRESETS } from '@/lib/stacktrace-rules'
 
 function legacyToConditions(a: { level_filter?: string; title_pattern?: string; exclude_pattern?: string; min_events?: number; min_velocity_1h?: number }): ConditionGroup {
   const conds: ConditionNode[] = []
@@ -48,7 +49,7 @@ const LEVEL_COLORS: Record<string, string> = {
   debug: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
 }
 
-type SettingsSection = 'general' | 'alerts' | 'tokens' | 'priority' | 'tags' | 'ai' | 'integrations' | 'danger'
+type SettingsSection = 'general' | 'issues' | 'alerts' | 'tokens' | 'priority' | 'tags' | 'ai' | 'integrations' | 'danger'
 
 export default function ProjectSettings() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -107,6 +108,7 @@ export default function ProjectSettings() {
   const [prOperator, setPrOperator] = useState('gte')
   const [prThreshold, setPrThreshold] = useState('')
   const [prPoints, setPrPoints] = useState('')
+  const [prConditions, setPrConditions] = useState<ConditionGroup>({ operator: 'and', conditions: [] })
   const [showDeletePriorityRule, setShowDeletePriorityRule] = useState<string | null>(null)
   const [recalcing, setRecalcing] = useState(false)
   // AI assistant dialog
@@ -151,7 +153,11 @@ export default function ProjectSettings() {
   const [defaultCooldown, setDefaultCooldown] = useState('60')
   const [warningAsError, setWarningAsError] = useState(false)
   const [maxEventsPerIssue, setMaxEventsPerIssue] = useState('1000')
+  const [maxInfoIssues, setMaxInfoIssues] = useState('0')
   const [issueDisplayMode, setIssueDisplayMode] = useState('classic')
+  const [errorGroupingMode, setErrorGroupingMode] = useState('normal')
+  const [warningGroupingMode, setWarningGroupingMode] = useState('normal')
+  const [infoGroupingMode, setInfoGroupingMode] = useState('normal')
   const [workflowMode, setWorkflowMode] = useState('simple')
   const [repoProvider, setRepoProvider] = useState('')
   const [repoOwner, setRepoOwner] = useState('')
@@ -159,14 +165,52 @@ export default function ProjectSettings() {
   const [repoDefaultBranch, setRepoDefaultBranch] = useState('main')
   const [repoToken, setRepoToken] = useState('')
   const [repoPathStrip, setRepoPathStrip] = useState('')
+  const [analysisDbEnabled, setAnalysisDbEnabled] = useState(false)
+  const [analysisDbDriver, setAnalysisDbDriver] = useState('')
+  const [analysisDbDsn, setAnalysisDbDsn] = useState('')
+  const [analysisDbName, setAnalysisDbName] = useState('')
+  const [analysisDbSchema, setAnalysisDbSchema] = useState('')
+  const [analysisDbNotes, setAnalysisDbNotes] = useState('')
+  const [showAnalysisDbGenerator, setShowAnalysisDbGenerator] = useState(false)
+  const [analysisDbGeneratorDriver, setAnalysisDbGeneratorDriver] = useState('')
+  const [analysisDbGeneratorHost, setAnalysisDbGeneratorHost] = useState('')
+  const [analysisDbGeneratorPort, setAnalysisDbGeneratorPort] = useState('')
+  const [analysisDbGeneratorUser, setAnalysisDbGeneratorUser] = useState('')
+  const [analysisDbGeneratorPassword, setAnalysisDbGeneratorPassword] = useState('')
+  const [analysisDbGeneratorDatabase, setAnalysisDbGeneratorDatabase] = useState('')
+  const [analysisDbGeneratorParams, setAnalysisDbGeneratorParams] = useState('')
+  const [savingAnalysisDb, setSavingAnalysisDb] = useState(false)
+  const [testingAnalysisDb, setTestingAnalysisDb] = useState(false)
+  const [framework, setFramework] = useState('generic')
+  const [routeGroupingEnabled, setRouteGroupingEnabled] = useState(false)
+  const [routeRules, setRouteRules] = useState<RouteRule[]>([])
+  const [importingRouteRules, setImportingRouteRules] = useState(false)
+  const [updatingRouteRuleId, setUpdatingRouteRuleId] = useState<string | null>(null)
+  const [routeImportSource, setRouteImportSource] = useState('source_code')
+  const [routeSourceFilter, setRouteSourceFilter] = useState('all')
+  const [routeConfidenceFilter, setRouteConfidenceFilter] = useState('all')
+  const [editingRouteRule, setEditingRouteRule] = useState<RouteRule | null>(null)
+  const [showRouteRuleForm, setShowRouteRuleForm] = useState(false)
+  const [routeRuleMethod, setRouteRuleMethod] = useState('*')
+  const [routeRuleMatchPattern, setRouteRuleMatchPattern] = useState('')
+  const [routeRuleCanonicalPath, setRouteRuleCanonicalPath] = useState('')
+  const [routeRuleTarget, setRouteRuleTarget] = useState('')
+  const [routeRuleSource, setRouteRuleSource] = useState('manual')
+  const [routeRuleConfidence, setRouteRuleConfidence] = useState('1')
+  const [routeRuleEnabled, setRouteRuleEnabled] = useState(true)
+  const [routeRuleNotes, setRouteRuleNotes] = useState('')
+  const [stacktracePreset, setStacktracePreset] = useState('generic')
+  const [stacktraceRules, setStacktraceRules] = useState<StacktraceRules>(buildStacktraceRulesPreset('generic'))
   const [repoTesting, setRepoTesting] = useState(false)
   const [savingRepo, setSavingRepo] = useState(false)
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const [savingGeneral, setSavingGeneral] = useState(false)
+  const [savingIssues, setSavingIssues] = useState(false)
   const [savingJira, setSavingJira] = useState(false)
   const [savingGithub, setSavingGithub] = useState(false)
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(true)
+  const aiFeaturesAvailable = aiEnabled && aiProviderConfigured
 
   // Confirm dialogs
   const [showDeleteProject, setShowDeleteProject] = useState(false)
@@ -196,6 +240,10 @@ export default function ProjectSettings() {
     setDefaultCooldown(String(p.default_cooldown_minutes ?? 60))
     setWarningAsError(p.warning_as_error)
     setMaxEventsPerIssue(String(p.max_events_per_issue ?? 1000))
+    setMaxInfoIssues(String(p.max_info_issues ?? 0))
+    setErrorGroupingMode(p.error_grouping_mode || 'normal')
+    setWarningGroupingMode(p.warning_grouping_mode || 'normal')
+    setInfoGroupingMode(p.info_grouping_mode || 'normal')
     setJiraBaseUrl(p.jira_base_url || '')
     setJiraEmail(p.jira_email || '')
     setJiraApiToken('')
@@ -213,6 +261,17 @@ export default function ProjectSettings() {
     setRepoDefaultBranch(p.repo_default_branch || 'main')
     setRepoToken('')
     setRepoPathStrip(p.repo_path_strip || '')
+    setAnalysisDbEnabled(p.analysis_db_enabled)
+    setAnalysisDbDriver(p.analysis_db_driver || '')
+    setAnalysisDbDsn('')
+    setAnalysisDbName(p.analysis_db_name || '')
+    setAnalysisDbSchema(p.analysis_db_schema || '')
+    setAnalysisDbNotes(p.analysis_db_notes || '')
+    setFramework(p.framework || 'generic')
+    setRouteGroupingEnabled(p.route_grouping_enabled)
+    const nextStacktraceRules = normalizeStacktraceRules(p.stacktrace_rules)
+    setStacktraceRules(nextStacktraceRules)
+    setStacktracePreset(nextStacktraceRules.preset || 'generic')
     setSelectedGroupId(p.group_id || '')
     setAiEnabled(p.ai_enabled)
     setAiModel(p.ai_model || '')
@@ -228,30 +287,52 @@ export default function ProjectSettings() {
     return updated
   }
 
-  const buildProjectPayload = () => ({
+  const buildGeneralPayload = () => ({
     name,
     slug,
+    workflow_mode: workflowMode,
+    group_id: selectedGroupId || null,
+    framework,
+  })
+
+  const buildIssuesPayload = () => ({
     default_cooldown_minutes: parseInt(defaultCooldown) || 0,
     warning_as_error: warningAsError,
     max_events_per_issue: parseInt(maxEventsPerIssue) || 0,
+    max_info_issues: parseInt(maxInfoIssues) || 0,
     issue_display_mode: issueDisplayMode,
-    workflow_mode: workflowMode,
+    error_grouping_mode: errorGroupingMode,
+    warning_grouping_mode: warningGroupingMode,
+    info_grouping_mode: infoGroupingMode,
+    route_grouping_enabled: routeGroupingEnabled,
+    stacktrace_rules: stacktraceRules,
+  })
+
+  const buildRepoPayload = () => ({
     repo_provider: repoProvider,
     repo_owner: repoOwner,
     repo_name: repoName,
     repo_default_branch: repoDefaultBranch,
     repo_token: repoToken,
     repo_path_strip: repoPathStrip,
+  })
+
+  const buildJiraPayload = () => ({
     jira_base_url: jiraBaseUrl,
     jira_email: jiraEmail,
     jira_api_token: jiraApiToken,
     jira_project_key: jiraProjectKey,
     jira_issue_type: jiraIssueType,
+  })
+
+  const buildGithubPayload = () => ({
     github_token: githubToken,
     github_owner: githubOwner,
     github_repo: githubRepo,
     github_labels: githubLabels,
-    group_id: selectedGroupId || null,
+  })
+
+  const buildAIPayload = () => ({
     ai_enabled: aiEnabled,
     ai_model: aiModel,
     ai_merge_suggestions: aiMergeSuggestions,
@@ -259,6 +340,134 @@ export default function ProjectSettings() {
     ai_ticket_description: aiTicketDescription,
     ai_root_cause: aiRootCause,
   })
+
+  const buildAnalysisDBPayload = () => ({
+    analysis_db_enabled: analysisDbEnabled,
+    analysis_db_driver: analysisDbDriver,
+    ...(analysisDbDsn.trim() ? { analysis_db_dsn: analysisDbDsn } : {}),
+    analysis_db_name: analysisDbName,
+    analysis_db_schema: analysisDbSchema,
+    analysis_db_notes: analysisDbNotes,
+  })
+
+  const defaultAnalysisDbPort = (driver: string) => {
+    if (driver === 'mysql') return '3306'
+    return '5432'
+  }
+
+  const openAnalysisDbGenerator = () => {
+    const nextDriver = analysisDbDriver || 'postgres'
+    setAnalysisDbGeneratorDriver(nextDriver)
+    setAnalysisDbGeneratorPort(defaultAnalysisDbPort(nextDriver))
+    setAnalysisDbGeneratorHost('')
+    setAnalysisDbGeneratorUser('')
+    setAnalysisDbGeneratorPassword('')
+    setAnalysisDbGeneratorDatabase('')
+    setAnalysisDbGeneratorParams(nextDriver === 'mysql' ? 'parseTime=true' : 'sslmode=disable')
+    setShowAnalysisDbGenerator(true)
+  }
+
+  const buildGeneratedAnalysisDbDsn = () => {
+    const driver = analysisDbGeneratorDriver || 'postgres'
+    const host = analysisDbGeneratorHost.trim()
+    const port = analysisDbGeneratorPort.trim() || defaultAnalysisDbPort(driver)
+    const user = encodeURIComponent(analysisDbGeneratorUser.trim())
+    const password = encodeURIComponent(analysisDbGeneratorPassword)
+    const database = encodeURIComponent(analysisDbGeneratorDatabase.trim())
+    const params = analysisDbGeneratorParams.trim()
+
+    if (!host || !database) return ''
+
+    if (driver === 'mysql') {
+      const auth = analysisDbGeneratorUser.trim()
+        ? `${user}:${password}@`
+        : ''
+      const query = params ? `?${params}` : ''
+      return `${auth}tcp(${host}:${port})/${database}${query}`
+    }
+
+    const auth = analysisDbGeneratorUser.trim()
+      ? `${user}:${password}@`
+      : ''
+    const query = params ? `?${params}` : ''
+    return `postgres://${auth}${host}:${port}/${database}${query}`
+  }
+
+  const canUseGeneratedAnalysisDbDsn = Boolean(
+    analysisDbGeneratorHost.trim() &&
+    analysisDbGeneratorDatabase.trim(),
+  )
+
+  const handleUseGeneratedAnalysisDbDsn = () => {
+    const dsn = buildGeneratedAnalysisDbDsn()
+    if (!dsn) {
+      toast.error('Fill at least host and database to generate the connection string')
+      return
+    }
+    setAnalysisDbDriver(analysisDbGeneratorDriver || 'postgres')
+    setAnalysisDbDsn(dsn)
+    setShowAnalysisDbGenerator(false)
+    toast.success('Connection string generated')
+  }
+
+  const buildRouteRulePayload = (): RouteRuleInput => ({
+    method: routeRuleMethod,
+    match_pattern: routeRuleMatchPattern,
+    canonical_path: routeRuleCanonicalPath,
+    target: routeRuleTarget,
+    source: routeRuleSource,
+    confidence: parseFloat(routeRuleConfidence) || 0.5,
+    enabled: routeRuleEnabled,
+    framework,
+    source_file: editingRouteRule?.source_file || '',
+    notes: routeRuleNotes,
+  })
+
+  const resetRouteRuleForm = () => {
+    setEditingRouteRule(null)
+    setRouteRuleMethod('*')
+    setRouteRuleMatchPattern('')
+    setRouteRuleCanonicalPath('')
+    setRouteRuleTarget('')
+    setRouteRuleSource('manual')
+    setRouteRuleConfidence('1')
+    setRouteRuleEnabled(true)
+    setRouteRuleNotes('')
+  }
+
+  const openCreateRouteRule = () => {
+    resetRouteRuleForm()
+    setShowRouteRuleForm(true)
+  }
+
+  const openEditRouteRule = (rule: RouteRule) => {
+    setEditingRouteRule(rule)
+    setRouteRuleMethod(rule.method || '*')
+    setRouteRuleMatchPattern(rule.match_pattern)
+    setRouteRuleCanonicalPath(rule.canonical_path)
+    setRouteRuleTarget(rule.target || '')
+    setRouteRuleSource(rule.source || 'manual')
+    setRouteRuleConfidence(String(rule.confidence || 0.5))
+    setRouteRuleEnabled(rule.enabled)
+    setRouteRuleNotes(rule.notes || '')
+    setShowRouteRuleForm(true)
+  }
+
+  const updateStacktracePatternGroup = (key: 'app_patterns' | 'framework_patterns' | 'external_patterns', value: string) => {
+    setStacktraceRules(prev => ({
+      ...prev,
+      [key]: value
+        .split('\n')
+        .map(pattern => pattern.trim())
+        .filter(Boolean),
+    }))
+  }
+
+  const loadStacktracePreset = () => {
+    const preset = buildStacktraceRulesPreset(stacktracePreset)
+    setStacktraceRules(preset)
+    toast.success(`${STACKTRACE_RULE_PRESETS.find(item => item.id === stacktracePreset)?.label || 'Preset'} rules loaded`)
+  }
 
   useEffect(() => {
     if (!projectId) return
@@ -271,6 +480,7 @@ export default function ProjectSettings() {
       api.listGroups().then(setAllGroups),
       api.listPriorityRules(projectId).then(setPriorityRules),
       api.listTagRules(projectId).then(setTagRules),
+      api.listRouteRules(projectId).then(items => setRouteRules(Array.isArray(items) ? items : [])),
       api.getAIStatus(projectId).then(s => { setAiProviderConfigured(s.provider_configured); setAiProviderName(s.provider) }).catch(() => {}),
       api.getAIUsage(projectId).then(setAiUsage).catch(() => {}),
     ]).finally(() => setLoading(false))
@@ -283,11 +493,26 @@ export default function ProjectSettings() {
     }
   }, [activeSection, isAdmin])
 
+  useEffect(() => {
+    if (aiFeaturesAvailable) return
+
+    if (prRuleType === 'ai_prompt') {
+      setPrRuleType('level_is')
+      setPrPattern('fatal')
+      setPrThreshold('')
+    }
+
+    if (trRuleType === 'ai_prompt') {
+      setTrRuleType('pattern')
+      setTrThreshold('')
+    }
+  }, [aiFeaturesAvailable, prRuleType, trRuleType])
+
   const handleSaveGeneral = async () => {
     if (!projectId) return
     setSavingGeneral(true)
     try {
-      await api.updateProject(projectId, buildProjectPayload())
+      await api.updateProject(projectId, buildGeneralPayload())
       await refreshProject(projectId)
       toast.success('General settings saved')
     } catch (e: unknown) {
@@ -297,11 +522,103 @@ export default function ProjectSettings() {
     }
   }
 
+  const handleSaveIssues = async () => {
+    if (!projectId) return
+    setSavingIssues(true)
+    try {
+      await api.updateProject(projectId, buildIssuesPayload())
+      await refreshProject(projectId)
+      toast.success('Issue settings saved')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save issue settings')
+    } finally {
+      setSavingIssues(false)
+    }
+  }
+
+  const handleImportRouteRules = async () => {
+    if (!projectId) return
+    if (framework === 'generic') {
+      toast.error('Select a project framework in General settings before importing route rules')
+      return
+    }
+    setImportingRouteRules(true)
+    try {
+      const result = await api.importRouteRules(projectId, { source: routeImportSource, framework })
+      setRouteRules(result.rules)
+      toast.success(`Imported ${result.imported} ${result.source.replace('_', ' ')} route rules`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to import route rules')
+    } finally {
+      setImportingRouteRules(false)
+    }
+  }
+
+  const handleToggleRouteRule = async (rule: RouteRule, enabled: boolean) => {
+    if (!projectId) return
+    setUpdatingRouteRuleId(rule.id)
+    try {
+      const updated = await api.updateRouteRule(projectId, rule.id, {
+        method: rule.method,
+        match_pattern: rule.match_pattern,
+        canonical_path: rule.canonical_path,
+        target: rule.target,
+        source: rule.source,
+        confidence: rule.confidence,
+        enabled,
+        framework: rule.framework,
+        source_file: rule.source_file,
+        notes: rule.notes,
+      })
+      setRouteRules(prev => prev.map(item => (item.id === updated.id ? updated : item)))
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update route rule')
+    } finally {
+      setUpdatingRouteRuleId(null)
+    }
+  }
+
+  const handleSaveRouteRule = async () => {
+    if (!projectId) return
+    setUpdatingRouteRuleId(editingRouteRule?.id || 'new')
+    try {
+      if (editingRouteRule) {
+        const updated = await api.updateRouteRule(projectId, editingRouteRule.id, buildRouteRulePayload())
+        setRouteRules(prev => prev.map(item => (item.id === updated.id ? updated : item)))
+        toast.success('Route rule updated')
+      } else {
+        const created = await api.createRouteRule(projectId, buildRouteRulePayload())
+        setRouteRules(prev => [created, ...prev])
+        toast.success('Route rule created')
+      }
+      setShowRouteRuleForm(false)
+      resetRouteRuleForm()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save route rule')
+    } finally {
+      setUpdatingRouteRuleId(null)
+    }
+  }
+
+  const handleDeleteRouteRule = async (rule: RouteRule) => {
+    if (!projectId) return
+    setUpdatingRouteRuleId(rule.id)
+    try {
+      await api.deleteRouteRule(projectId, rule.id)
+      setRouteRules(prev => prev.filter(item => item.id !== rule.id))
+      toast.success('Route rule deleted')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete route rule')
+    } finally {
+      setUpdatingRouteRuleId(null)
+    }
+  }
+
   const handleSaveJira = async () => {
     if (!projectId) return
     setSavingJira(true)
     try {
-      await api.updateProject(projectId, buildProjectPayload())
+      await api.updateProject(projectId, buildJiraPayload())
       await refreshProject(projectId)
       toast.success('Jira settings saved')
     } catch (e: unknown) {
@@ -315,7 +632,7 @@ export default function ProjectSettings() {
     if (!projectId) return
     setSavingRepo(true)
     try {
-      await api.updateProject(projectId, buildProjectPayload())
+      await api.updateProject(projectId, buildRepoPayload())
       await refreshProject(projectId)
       toast.success('Repository settings saved')
     } catch (e: unknown) {
@@ -329,7 +646,7 @@ export default function ProjectSettings() {
     if (!projectId) return
     setRepoTesting(true)
     try {
-      await api.updateProject(projectId, buildProjectPayload())
+      await api.updateProject(projectId, buildRepoPayload())
       await refreshProject(projectId)
       const result = await api.testRepoConnection(projectId)
       if (result.ok) {
@@ -348,7 +665,7 @@ export default function ProjectSettings() {
     if (!projectId) return
     setSavingGithub(true)
     try {
-      await api.updateProject(projectId, buildProjectPayload())
+      await api.updateProject(projectId, buildGithubPayload())
       await refreshProject(projectId)
       toast.success('GitHub settings saved')
     } catch (e: unknown) {
@@ -362,7 +679,7 @@ export default function ProjectSettings() {
     if (!projectId) return
     setSavingAI(true)
     try {
-      await api.updateProject(projectId, buildProjectPayload())
+      await api.updateProject(projectId, buildAIPayload())
       await refreshProject(projectId)
       const usage = await api.getAIUsage(projectId).catch(() => null)
       if (usage) setAiUsage(usage)
@@ -371,6 +688,39 @@ export default function ProjectSettings() {
       toast.error(e instanceof Error ? e.message : 'Failed to save AI settings')
     } finally {
       setSavingAI(false)
+    }
+  }
+
+  const handleSaveAnalysisDB = async () => {
+    if (!projectId) return
+    setSavingAnalysisDb(true)
+    try {
+      await api.updateProject(projectId, buildAnalysisDBPayload())
+      await refreshProject(projectId)
+      toast.success('Database analysis settings saved')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save database analysis settings')
+    } finally {
+      setSavingAnalysisDb(false)
+    }
+  }
+
+  const handleTestAnalysisDB = async () => {
+    if (!projectId) return
+    setTestingAnalysisDb(true)
+    try {
+      await api.updateProject(projectId, buildAnalysisDBPayload())
+      await refreshProject(projectId)
+      const result = await api.testDBAnalysisConnection(projectId)
+      if (result.ok) {
+        toast.success('Database analysis connection successful')
+      } else {
+        toast.error(result.error || 'Connection failed')
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Connection test failed')
+    } finally {
+      setTestingAnalysisDb(false)
     }
   }
 
@@ -398,21 +748,27 @@ export default function ProjectSettings() {
     setShowAlertForm(true)
   }
 
-  const openEditAlert = (a: AlertConfig) => {
-    setEditingAlert(a)
-    setAlertType(a.alert_type)
-    setAlertConfig(
-      a.alert_type === 'email'
-        ? (a.config as { recipients?: string[] }).recipients?.join(', ') || ''
-        : (a.config as { webhook_url?: string }).webhook_url || ''  // will be empty when redacted
-    )
-    // If conditions JSONB exists, use it; otherwise auto-convert legacy fields
-    if (a.conditions) {
-      setAlertConditions(a.conditions as unknown as ConditionGroup)
-    } else {
-      setAlertConditions(legacyToConditions(a))
+  const openEditAlert = async (a: AlertConfig) => {
+    if (!projectId) return
+    try {
+      const fullAlert = await api.getAlert(projectId, a.id)
+      setEditingAlert(fullAlert)
+      setAlertType(fullAlert.alert_type)
+      setAlertConfig(
+        fullAlert.alert_type === 'email'
+          ? (fullAlert.config as { recipients?: string[] }).recipients?.join(', ') || ''
+          : (fullAlert.config as { webhook_url?: string }).webhook_url || ''
+      )
+      // If conditions JSONB exists, use it; otherwise auto-convert legacy fields
+      if (fullAlert.conditions) {
+        setAlertConditions(fullAlert.conditions as unknown as ConditionGroup)
+      } else {
+        setAlertConditions(legacyToConditions(fullAlert))
+      }
+      setShowAlertForm(true)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load alert')
     }
-    setShowAlertForm(true)
   }
 
   const handleSaveAlert = async () => {
@@ -558,7 +914,7 @@ export default function ProjectSettings() {
     if (!projectId) return
     setJiraTesting(true)
     try {
-      await api.updateProject(projectId, buildProjectPayload())
+      await api.updateProject(projectId, buildJiraPayload())
       await refreshProject(projectId)
       const result = await api.testJiraConnection(projectId)
       if (result.ok) {
@@ -638,7 +994,7 @@ export default function ProjectSettings() {
     if (!projectId) return
     setGithubTesting(true)
     try {
-      await api.updateProject(projectId, buildProjectPayload())
+      await api.updateProject(projectId, buildGithubPayload())
       await refreshProject(projectId)
       const result = await api.testGithubConnection(projectId)
       if (result.ok) {
@@ -724,7 +1080,6 @@ export default function ProjectSettings() {
     { value: 'user_count', label: 'Affected users', needsPattern: false, needsThreshold: true, needsPrompt: false },
     ...(aiEnabled && aiProviderConfigured ? [{ value: 'ai_prompt', label: 'AI Prompt', needsPattern: false, needsThreshold: false, needsPrompt: true }] : []),
   ]
-
   const openAddPriorityRule = () => {
     setEditingPriorityRule(null)
     setPrRuleName('')
@@ -733,17 +1088,19 @@ export default function ProjectSettings() {
     setPrOperator('gte')
     setPrThreshold('')
     setPrPoints('')
+    setPrConditions({ operator: 'and', conditions: [] })
     setShowPriorityRuleForm(true)
   }
 
   const openEditPriorityRule = (r: PriorityRule) => {
     setEditingPriorityRule(r)
     setPrRuleName(r.name)
-    setPrRuleType(r.rule_type)
+    setPrRuleType(!aiFeaturesAvailable && r.rule_type === 'ai_prompt' ? 'level_is' : r.rule_type)
     setPrPattern(r.pattern)
     setPrOperator(r.operator)
     setPrThreshold(r.threshold > 0 ? String(r.threshold) : '')
     setPrPoints(String(r.points))
+    setPrConditions((r.conditions as ConditionGroup | null) || { operator: 'and', conditions: [] })
     setShowPriorityRuleForm(true)
   }
 
@@ -757,6 +1114,7 @@ export default function ProjectSettings() {
       threshold: parseInt(prThreshold) || 0,
       points: parseInt(prPoints) || 0,
       enabled: editingPriorityRule ? editingPriorityRule.enabled : true,
+      conditions: prConditions.conditions.length > 0 ? prConditions : undefined,
     }
     try {
       if (editingPriorityRule) {
@@ -775,7 +1133,14 @@ export default function ProjectSettings() {
   const handleTogglePriorityRule = async (r: PriorityRule) => {
     if (!projectId) return
     await api.updatePriorityRule(projectId, r.id, {
-      ...r, enabled: !r.enabled,
+      name: r.name,
+      rule_type: r.rule_type,
+      pattern: r.pattern,
+      operator: r.operator,
+      threshold: r.threshold,
+      points: r.points,
+      enabled: !r.enabled,
+      conditions: r.conditions || undefined,
     })
     setPriorityRules(await api.listPriorityRules(projectId))
   }
@@ -855,7 +1220,7 @@ export default function ProjectSettings() {
     setShowTagRuleForm(true)
   }
   const openEditTagRule = (r: TagRule) => {
-    setEditingTagRule(r); setTrName(r.name); setTrRuleType((r.rule_type || 'pattern') as 'pattern' | 'ai_prompt'); setTrPattern(r.pattern); setTrTagKey(r.tag_key); setTrTagValue(r.tag_value); setTrThreshold(r.threshold > 0 ? String(r.threshold) : '')
+    setEditingTagRule(r); setTrName(r.name); setTrRuleType(!aiFeaturesAvailable && r.rule_type === 'ai_prompt' ? 'pattern' : (r.rule_type || 'pattern') as 'pattern' | 'ai_prompt'); setTrPattern(r.pattern); setTrTagKey(r.tag_key); setTrTagValue(r.tag_value); setTrThreshold(r.threshold > 0 ? String(r.threshold) : '')
     setShowTagRuleForm(true)
   }
   const handleSaveTagRule = async () => {
@@ -934,12 +1299,15 @@ export default function ProjectSettings() {
     }
   }
 
+  const selectedGroup = allGroups.find(group => group.id === selectedGroupId)
+
   const formatAlertDestination = (a: AlertConfig) => {
     if (a.alert_type === 'email') {
       return (a.config as { recipients?: string[] }).recipients?.join(', ') || ''
     }
     const cfg = a.config as { webhook_url?: string; webhook_url_set?: boolean }
     if (cfg.webhook_url_set && !cfg.webhook_url) return 'Webhook configured'
+    if (!cfg.webhook_url && selectedGroup?.default_slack_webhook_url_set) return 'Using group default webhook'
     return cfg.webhook_url || ''
   }
 
@@ -956,12 +1324,24 @@ export default function ProjectSettings() {
     (githubToken || project?.github_token_set)
   )
 
+  const canTestAnalysisDB = Boolean(
+    analysisDbEnabled &&
+    analysisDbDriver &&
+    (analysisDbDsn || project?.analysis_db_configured)
+  )
+
   const sections = [
     {
       id: 'general' as const,
       label: 'General',
       badge: 'Core',
       icon: Settings,
+    },
+    {
+      id: 'issues' as const,
+      label: 'Issues',
+      badge: '',
+      icon: Bug,
     },
     {
       id: 'alerts' as const,
@@ -1015,6 +1395,14 @@ export default function ProjectSettings() {
       : []),
   ]
 
+  const filteredRouteRules = (routeRules || []).filter(rule => {
+    if (routeSourceFilter !== 'all' && rule.source !== routeSourceFilter) return false
+    if (routeConfidenceFilter === 'high' && rule.confidence < 0.8) return false
+    if (routeConfidenceFilter === 'medium' && (rule.confidence < 0.5 || rule.confidence >= 0.8)) return false
+    if (routeConfidenceFilter === 'low' && rule.confidence >= 0.5) return false
+    return true
+  })
+
   if (loading) return (
     <div className="text-center py-12">
       <div className="inline-block h-6 w-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -1025,6 +1413,7 @@ export default function ProjectSettings() {
     <div className="space-y-6">
       <Breadcrumb items={[
         { label: 'Projects', to: '/' },
+        ...(project?.group_name && project?.group_id ? [{ label: project.group_name, to: `/?group=${project.group_id}` }] : []),
         { label: project?.name || '', to: `/projects/${projectId}` },
         { label: 'Settings' },
       ]} />
@@ -1143,7 +1532,7 @@ export default function ProjectSettings() {
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">Project Defaults</CardTitle>
-                    <CardDescription>These values shape how new events are grouped and how resolution behaves by default.</CardDescription>
+                    <CardDescription>Core project identity and workflow configuration.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-5">
                     <div className="grid gap-4 md:grid-cols-2">
@@ -1159,70 +1548,25 @@ export default function ProjectSettings() {
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <div>
-                        <label className="text-sm font-medium">Default Cooldown</label>
-                        <Select value={defaultCooldown} onChange={e => setDefaultCooldown(e.target.value)} className="mt-1">
-                          <option value="0">No cooldown</option>
-                          <option value="60">1 hour</option>
-                          <option value="120">2 hours</option>
-                          <option value="1440">1 day</option>
-                          <option value="2880">2 days</option>
-                          <option value="10080">1 week</option>
+                        <label className="text-sm font-medium">Workflow Mode</label>
+                        <Select value={workflowMode} onChange={e => setWorkflowMode(e.target.value)} className="mt-1 max-w-xs">
+                          <option value="simple">Simple (monitoring only)</option>
+                          <option value="managed">Managed (tickets + board)</option>
                         </Select>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Used when resolving issues with the project default option.
+                          Simple: issues have basic statuses. Managed: enables tickets with workflow, assignment, board view, and escalation.
                         </p>
                       </div>
-
                       <div>
-                        <label className="text-sm font-medium">Warning Handling</label>
-                        <Select
-                          value={warningAsError ? 'error' : 'warning'}
-                          onChange={e => setWarningAsError(e.target.value === 'error')}
-                          className="mt-1"
-                        >
-                          <option value="warning">Keep warnings separate</option>
-                          <option value="error">Treat warnings as errors</option>
+                        <label className="text-sm font-medium">Framework</label>
+                        <Select value={framework} onChange={e => setFramework(e.target.value)} className="mt-1 max-w-xs">
+                          <option value="generic">Generic</option>
+                          <option value="codeigniter">CodeIgniter</option>
                         </Select>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Promote incoming warning events to error issues when enabled.
+                          Project-wide framework preset used by route grouping and future framework-aware analysis.
                         </p>
                       </div>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium">Max Events per Issue</label>
-                      <Input
-                        type="number"
-                        value={maxEventsPerIssue}
-                        onChange={e => setMaxEventsPerIssue(e.target.value)}
-                        min="0"
-                        className="mt-1 max-w-xs"
-                      />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Stop recording new events for an issue after this limit. Set to 0 for unlimited.
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium">Issue List Display</label>
-                      <Select value={issueDisplayMode} onChange={e => setIssueDisplayMode(e.target.value)} className="mt-1 max-w-xs">
-                        <option value="classic">Classic (badges + full title)</option>
-                        <option value="detailed">Detailed (exception + endpoint + message)</option>
-                      </Select>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Default display mode for the issue list. Users can toggle per-session.
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium">Workflow Mode</label>
-                      <Select value={workflowMode} onChange={e => setWorkflowMode(e.target.value)} className="mt-1 max-w-xs">
-                        <option value="simple">Simple (monitoring only)</option>
-                        <option value="managed">Managed (tickets + board)</option>
-                      </Select>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Simple: issues have basic statuses. Managed: enables tickets with workflow, assignment, board view, and escalation.
-                      </p>
                     </div>
 
                     {allGroups.length > 0 && (
@@ -1249,6 +1593,657 @@ export default function ProjectSettings() {
                   </CardContent>
                 </Card>
               )}
+            </>
+          )}
+
+          {activeSection === 'issues' && (
+            <>
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Issues</p>
+                <h2 className="text-xl font-semibold">Issue behavior and display</h2>
+                <p className="text-sm text-muted-foreground">
+                  Control how issues are grouped, displayed, and processed for this project.
+                </p>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Issue Handling</CardTitle>
+                  <CardDescription>These values shape how events are grouped and how resolution behaves.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="text-sm font-medium">Default Cooldown</label>
+                      <Select value={defaultCooldown} onChange={e => setDefaultCooldown(e.target.value)} className="mt-1">
+                        <option value="0">No cooldown</option>
+                        <option value="60">1 hour</option>
+                        <option value="120">2 hours</option>
+                        <option value="1440">1 day</option>
+                        <option value="2880">2 days</option>
+                        <option value="10080">1 week</option>
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Used when resolving issues with the project default option.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium">Warning Handling</label>
+                      <Select
+                        value={warningAsError ? 'error' : 'warning'}
+                        onChange={e => setWarningAsError(e.target.value === 'error')}
+                        className="mt-1"
+                      >
+                        <option value="warning">Keep warnings separate</option>
+                        <option value="error">Treat warnings as errors</option>
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Promote incoming warning events to error issues when enabled.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium">Max Events per Issue</label>
+                    <Input
+                      type="number"
+                      value={maxEventsPerIssue}
+                      onChange={e => setMaxEventsPerIssue(e.target.value)}
+                      min="0"
+                      className="mt-1 max-w-xs"
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Stop recording new events for an issue after this limit. Set to 0 for unlimited.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div>
+                      <label className="text-sm font-medium">Error Grouping</label>
+                      <Select value={errorGroupingMode} onChange={e => setErrorGroupingMode(e.target.value)} className="mt-1">
+                        <option value="normal">Normal</option>
+                        <option value="by_url">By URL</option>
+                        <option value="by_file">By file</option>
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Controls how new `error` issues are fingerprinted when they do not have an exception stack trace.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium">Warning Grouping</label>
+                      <Select value={warningGroupingMode} onChange={e => setWarningGroupingMode(e.target.value)} className="mt-1">
+                        <option value="normal">Normal</option>
+                        <option value="by_url">By URL</option>
+                        <option value="by_file">By file</option>
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Controls how new `warning` issues are fingerprinted. If warnings are promoted to errors above, the error grouping mode is used instead.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium">Info / Debug Grouping</label>
+                      <Select value={infoGroupingMode} onChange={e => setInfoGroupingMode(e.target.value)} className="mt-1">
+                        <option value="normal">Normal</option>
+                        <option value="by_url">By URL</option>
+                        <option value="by_file">By file</option>
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Controls how new `info` and `debug` issues are fingerprinted. Changing it affects new incoming events; existing issues keep their current fingerprint unless you merge or rebuild them.
+                      </p>
+                    </div>
+
+                    <div className="xl:col-span-3">
+                      <label className="text-sm font-medium">Max Info / Debug Issues</label>
+                      <Input
+                        type="number"
+                        value={maxInfoIssues}
+                        onChange={e => setMaxInfoIssues(e.target.value)}
+                        min="0"
+                        className="mt-1 max-w-xs"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Maximum number of distinct `info/debug` issues allowed. When reached, new informational issues are dropped, but existing ones still receive events.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium">Issue List Display</label>
+                    <Select value={issueDisplayMode} onChange={e => setIssueDisplayMode(e.target.value)} className="mt-1 max-w-xs">
+                      <option value="classic">Classic (badges + full title)</option>
+                      <option value="detailed">Detailed (exception + endpoint + message)</option>
+                    </Select>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Default display mode for the issue list. Users can toggle per-session.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">Issue settings save independently from general and integration settings.</p>
+                    <Button onClick={handleSaveIssues} disabled={savingIssues}>
+                      {savingIssues ? 'Saving...' : 'Save Issue Settings'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Stack Trace Rules</CardTitle>
+                  <CardDescription>
+                    Load a framework preset, then edit the regex lists to decide what counts as app, framework, or external code for this project.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                    <div>
+                      <label className="text-sm font-medium">Framework Preset</label>
+                      <Select value={stacktracePreset} onChange={e => setStacktracePreset(e.target.value)} className="mt-1">
+                        {STACKTRACE_RULE_PRESETS.map(preset => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {STACKTRACE_RULE_PRESETS.find(item => item.id === stacktracePreset)?.description}
+                      </p>
+                    </div>
+                    <Button type="button" variant="outline" onClick={loadStacktracePreset}>
+                      Load Rules
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-3">
+                    <div>
+                      <label className="text-sm font-medium">App Patterns</label>
+                      <textarea
+                        value={stacktraceRules.app_patterns.join('\n')}
+                        onChange={e => updateStacktracePatternGroup('app_patterns', e.target.value)}
+                        placeholder="(^|/)application/"
+                        rows={7}
+                        className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">One regex per line. These frames are shown first.</p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium">Framework Patterns</label>
+                      <textarea
+                        value={stacktraceRules.framework_patterns.join('\n')}
+                        onChange={e => updateStacktracePatternGroup('framework_patterns', e.target.value)}
+                        placeholder="(^|/)system/"
+                        rows={7}
+                        className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">Use this for framework core or any directories you still want visible but separated.</p>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium">External Patterns</label>
+                      <textarea
+                        value={stacktraceRules.external_patterns.join('\n')}
+                        onChange={e => updateStacktracePatternGroup('external_patterns', e.target.value)}
+                        placeholder="(^|/)vendor/"
+                        rows={7}
+                        className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">Libraries and dependencies you usually want collapsed or toned down.</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+                    You can load a preset and then tweak it. That covers teams who patch framework internals or want certain framework paths highlighted instead of hidden.
+                  </div>
+
+                  <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">Stack trace rules are saved together with issue settings.</p>
+                    <Button onClick={handleSaveIssues} disabled={savingIssues}>
+                      {savingIssues ? 'Saving...' : 'Save Stack Trace Rules'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Route Grouping</CardTitle>
+                  <CardDescription>
+                    Normalize dynamic URLs into framework-aware route templates so `by_url` grouping uses stable endpoints instead of raw parameters.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-muted/20 p-4">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Use canonical routes for URL grouping</p>
+                      <p className="text-xs text-muted-foreground">
+                        When enabled, incoming URLs try to match imported route rules before building the `by_url` fingerprint.
+                      </p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={routeGroupingEnabled}
+                        onChange={e => setRouteGroupingEnabled(e.target.checked)}
+                        className="h-4 w-4 rounded border-input bg-background"
+                      />
+                      Enabled
+                    </label>
+                  </div>
+
+                  {routeGroupingEnabled && (
+                    <>
+                      {framework === 'generic' && (
+                        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                          Select a project framework in <span className="font-medium">General settings</span> before importing route rules.
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-4 rounded-md border border-border/60 bg-muted/20 p-4">
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">Import framework routes</p>
+                          <p className="text-xs text-muted-foreground">
+                            Source code import reads explicit route files from the connected repository or an available local checkout. CodeIgniter convention fallback also works at runtime even without imported rules.
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                          <div>
+                            <label className="text-sm font-medium">Import source</label>
+                            <Select value={routeImportSource} onChange={e => setRouteImportSource(e.target.value)} className="mt-1 max-w-xs">
+                              <option value="source_code">Source code</option>
+                              <option value="framework_convention">Framework conventions</option>
+                            </Select>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!projectId || importingRouteRules}
+                            onClick={handleImportRouteRules}
+                          >
+                            {importingRouteRules ? 'Importing...' : 'Import Rules'}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 p-4 md:flex-row md:items-end md:justify-between">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">Filter by source</label>
+                            <Select value={routeSourceFilter} onChange={e => setRouteSourceFilter(e.target.value)} className="mt-1 max-w-xs">
+                              <option value="all">All sources</option>
+                              <option value="manual">Manual</option>
+                              <option value="source_code">Source code</option>
+                              <option value="framework_convention">Framework convention</option>
+                              <option value="observed_issue">Observed issue</option>
+                              <option value="ai_suggestion">AI suggestion</option>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Filter by confidence</label>
+                            <Select value={routeConfidenceFilter} onChange={e => setRouteConfidenceFilter(e.target.value)} className="mt-1 max-w-xs">
+                              <option value="all">All confidence levels</option>
+                              <option value="high">High (≥ 0.8)</option>
+                              <option value="medium">Medium (0.5 - 0.79)</option>
+                              <option value="low">Low (&lt; 0.5)</option>
+                            </Select>
+                          </div>
+                        </div>
+                        <Button type="button" variant="outline" onClick={openCreateRouteRule}>
+                          Create Manual Rule
+                        </Button>
+                      </div>
+
+                      <div className="overflow-x-auto rounded-md border border-border/60">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                            <tr>
+                              <th className="px-3 py-2 font-medium">On</th>
+                              <th className="px-3 py-2 font-medium">Method</th>
+                              <th className="px-3 py-2 font-medium">Template</th>
+                              <th className="px-3 py-2 font-medium">Target</th>
+                              <th className="px-3 py-2 font-medium">Source</th>
+                              <th className="px-3 py-2 font-medium">Confidence</th>
+                              <th className="px-3 py-2 font-medium">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredRouteRules.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                  No route rules imported yet.
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredRouteRules.map(rule => (
+                                <tr key={rule.id} className="border-t border-border/50 align-top">
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={rule.enabled}
+                                      disabled={updatingRouteRuleId === rule.id}
+                                      onChange={e => handleToggleRouteRule(rule, e.target.checked)}
+                                      className="mt-1 h-4 w-4 rounded border-input bg-background"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{rule.method}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="font-mono text-xs">{rule.canonical_path}</div>
+                                    <div className="mt-1 font-mono text-[11px] text-muted-foreground">{rule.match_pattern}</div>
+                                  </td>
+                                  <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{rule.target || '—'}</td>
+                                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                                    <div>{rule.source}</div>
+                                    {rule.source_file && <div className="mt-1 font-mono text-[11px]">{rule.source_file}</div>}
+                                  </td>
+                                  <td className="px-3 py-2 text-xs text-muted-foreground">{rule.confidence.toFixed(2)}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex gap-2">
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditRouteRule(rule)}>
+                                            <Pencil className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Edit rule</TooltipContent>
+                                      </Tooltip>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8"
+                                            onClick={() => handleDeleteRouteRule(rule)}
+                                            disabled={updatingRouteRuleId === rule.id}
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>Delete rule</TooltipContent>
+                                      </Tooltip>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      {routeGroupingEnabled
+                        ? 'Route grouping settings are saved together with issue settings.'
+                        : 'Enable canonical routes only if you want framework-aware URL grouping.'}
+                    </p>
+                    <Button onClick={handleSaveIssues} disabled={savingIssues}>
+                      {savingIssues ? 'Saving...' : 'Save Route Grouping Settings'}
+                    </Button>
+                  </div>
+
+                  <Dialog open={showRouteRuleForm} onOpenChange={open => { setShowRouteRuleForm(open); if (!open) resetRouteRuleForm() }}>
+                    <DialogContent>
+                      <DialogTitle>{editingRouteRule ? 'Edit Route Rule' : 'Create Route Rule'}</DialogTitle>
+                      <DialogDescription className="sr-only">Configure a route grouping rule</DialogDescription>
+                      <div className="mt-4 grid gap-4">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">Method</label>
+                            <Select value={routeRuleMethod} onChange={e => setRouteRuleMethod(e.target.value)} className="mt-1">
+                              <option value="*">Any</option>
+                              <option value="GET">GET</option>
+                              <option value="POST">POST</option>
+                              <option value="PUT">PUT</option>
+                              <option value="DELETE">DELETE</option>
+                              <option value="PATCH">PATCH</option>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Source</label>
+                            <Select value={routeRuleSource} onChange={e => setRouteRuleSource(e.target.value)} className="mt-1">
+                              <option value="manual">Manual</option>
+                              <option value="source_code">Source code</option>
+                              <option value="framework_convention">Framework convention</option>
+                              <option value="observed_issue">Observed issue</option>
+                              <option value="ai_suggestion">AI suggestion</option>
+                            </Select>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Match Pattern</label>
+                          <Input value={routeRuleMatchPattern} onChange={e => setRouteRuleMatchPattern(e.target.value)} className="mt-1" placeholder="coverApp/Reserv/getCalendar/(:num)/(:num)" />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Canonical Path</label>
+                          <Input value={routeRuleCanonicalPath} onChange={e => setRouteRuleCanonicalPath(e.target.value)} className="mt-1" placeholder="/coverApp/Reserv/getCalendar/:num/:num" />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Target</label>
+                          <Input value={routeRuleTarget} onChange={e => setRouteRuleTarget(e.target.value)} className="mt-1" placeholder="Reserv::getCalendar" />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Confidence</label>
+                          <Input value={routeRuleConfidence} onChange={e => setRouteRuleConfidence(e.target.value)} className="mt-1" placeholder="1.0" />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Notes</label>
+                          <Input value={routeRuleNotes} onChange={e => setRouteRuleNotes(e.target.value)} className="mt-1" placeholder="Optional note" />
+                        </div>
+                        <label className="inline-flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={routeRuleEnabled}
+                            onChange={e => setRouteRuleEnabled(e.target.checked)}
+                            className="h-4 w-4 rounded border-input bg-background"
+                          />
+                          Enabled
+                        </label>
+                        <div className="flex justify-end gap-2">
+                          <Button type="button" variant="outline" onClick={() => { setShowRouteRuleForm(false); resetRouteRuleForm() }}>
+                            Cancel
+                          </Button>
+                          <Button type="button" onClick={handleSaveRouteRule} disabled={!routeRuleMatchPattern || !routeRuleCanonicalPath || updatingRouteRuleId === 'new' || updatingRouteRuleId === editingRouteRule?.id}>
+                            {editingRouteRule ? 'Save Rule' : 'Create Rule'}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Database Analysis</CardTitle>
+                  <CardDescription>
+                    Configure a dedicated read-only database connection for SQL breadcrumb analysis, N+1 heuristics, and future EXPLAIN plans.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-muted/20 p-4">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Enable database analysis for this project</p>
+                      <p className="text-xs text-muted-foreground">
+                        This connection is stored separately from the ingest DSN and should use minimal, ideally read-only, permissions.
+                      </p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={analysisDbEnabled}
+                        onChange={e => setAnalysisDbEnabled(e.target.checked)}
+                        className="h-4 w-4 rounded border-input bg-background"
+                      />
+                      Enabled
+                    </label>
+                  </div>
+
+                  {analysisDbEnabled && (
+                    <>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="text-sm font-medium">Driver</label>
+                          <Select value={analysisDbDriver} onChange={e => setAnalysisDbDriver(e.target.value)} className="mt-1">
+                            <option value="">Select driver</option>
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="mysql">MySQL / MariaDB</option>
+                          </Select>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Database Name</label>
+                          <Input value={analysisDbName} onChange={e => setAnalysisDbName(e.target.value)} placeholder="Optional label for the target database" className="mt-1" />
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="text-sm font-medium">Schema</label>
+                          <Input value={analysisDbSchema} onChange={e => setAnalysisDbSchema(e.target.value)} placeholder="Optional schema (for PostgreSQL)" className="mt-1" />
+                        </div>
+                        <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+                          {project?.analysis_db_configured
+                            ? 'A database analysis DSN is already stored for this project.'
+                            : 'No database analysis DSN stored yet.'}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between gap-3">
+                          <label className="text-sm font-medium">Connection String</label>
+                          <Button type="button" variant="outline" size="sm" onClick={openAnalysisDbGenerator}>
+                            Generate
+                          </Button>
+                        </div>
+                        <Input
+                          type="password"
+                          value={analysisDbDsn}
+                          onChange={e => setAnalysisDbDsn(e.target.value)}
+                          placeholder={project?.analysis_db_configured ? 'Leave blank to keep the existing DSN' : 'postgres://... or user:pass@tcp(host:3306)/db'}
+                          className="mt-1"
+                        />
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          The DSN is stored server-side and never returned to the browser. Leave it blank to keep the existing value.
+                        </p>
+                      </div>
+
+                      {project?.analysis_db_dsn_display && (
+                        <div>
+                          <label className="text-sm font-medium">Stored DSN</label>
+                          <code className="mt-1 block rounded bg-muted px-3 py-2 text-sm font-mono break-all">
+                            {project.analysis_db_dsn_display}
+                          </code>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Passwords are redacted in the displayed value.
+                          </p>
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="text-sm font-medium">Notes</label>
+                        <textarea
+                          value={analysisDbNotes}
+                          onChange={e => setAnalysisDbNotes(e.target.value)}
+                          placeholder="Optional notes for the team: read-only user, replica hostname, schema caveats, etc."
+                          rows={3}
+                          className="mt-1 flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      {analysisDbEnabled
+                        ? <>Save the connection here, then use <span className="font-medium text-foreground">Analyze</span> from issue SQL breadcrumbs.</>
+                        : 'Enable database analysis only when this project should allow SQL breadcrumb analysis and EXPLAIN tooling.'}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={handleTestAnalysisDB} disabled={!canTestAnalysisDB || testingAnalysisDb}>
+                        {testingAnalysisDb ? 'Testing...' : 'Test Connection'}
+                      </Button>
+                      <Button onClick={handleSaveAnalysisDB} disabled={savingAnalysisDb}>
+                        {savingAnalysisDb ? 'Saving...' : 'Save Database Analysis Settings'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Dialog open={showAnalysisDbGenerator} onOpenChange={setShowAnalysisDbGenerator}>
+                    <DialogContent>
+                      <DialogTitle>Generate Connection String</DialogTitle>
+                      <DialogDescription>
+                        Build a DSN from host, port, credentials, and database details instead of typing it manually.
+                      </DialogDescription>
+                      <div className="mt-4 grid gap-4">
+                        <div>
+                          <label className="text-sm font-medium">Driver</label>
+                          <Select
+                            value={analysisDbGeneratorDriver}
+                            onChange={e => {
+                              const nextDriver = e.target.value
+                              setAnalysisDbGeneratorDriver(nextDriver)
+                              setAnalysisDbGeneratorPort(defaultAnalysisDbPort(nextDriver))
+                              setAnalysisDbGeneratorParams(nextDriver === 'mysql' ? 'parseTime=true' : 'sslmode=disable')
+                            }}
+                            className="mt-1"
+                          >
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="mysql">MySQL / MariaDB</option>
+                          </Select>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">Host / URL</label>
+                            <Input value={analysisDbGeneratorHost} onChange={e => setAnalysisDbGeneratorHost(e.target.value)} className="mt-1" placeholder="db.example.internal" />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Port</label>
+                            <Input value={analysisDbGeneratorPort} onChange={e => setAnalysisDbGeneratorPort(e.target.value)} className="mt-1" placeholder={defaultAnalysisDbPort(analysisDbGeneratorDriver || 'postgres')} />
+                          </div>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">User</label>
+                            <Input value={analysisDbGeneratorUser} onChange={e => setAnalysisDbGeneratorUser(e.target.value)} className="mt-1" placeholder="readonly_user" />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Password</label>
+                            <Input type="password" value={analysisDbGeneratorPassword} onChange={e => setAnalysisDbGeneratorPassword(e.target.value)} className="mt-1" placeholder="password" />
+                          </div>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium">Database</label>
+                            <Input value={analysisDbGeneratorDatabase} onChange={e => setAnalysisDbGeneratorDatabase(e.target.value)} className="mt-1" placeholder="gosnag_reporting" />
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium">Query Params</label>
+                            <Input value={analysisDbGeneratorParams} onChange={e => setAnalysisDbGeneratorParams(e.target.value)} className="mt-1" placeholder={analysisDbGeneratorDriver === 'mysql' ? 'parseTime=true' : 'sslmode=require'} />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Preview</label>
+                          <code className="mt-1 block rounded bg-muted px-3 py-2 text-sm font-mono break-all">
+                            {buildGeneratedAnalysisDbDsn() || 'Fill the form to preview the generated connection string.'}
+                          </code>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button type="button" variant="outline" onClick={() => setShowAnalysisDbGenerator(false)}>
+                            Cancel
+                          </Button>
+                          <Button type="button" onClick={handleUseGeneratedAnalysisDbDsn} disabled={!canUseGeneratedAnalysisDbDsn}>
+                            Use Connection String
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </CardContent>
+              </Card>
             </>
           )}
 
@@ -1367,7 +2362,7 @@ export default function ProjectSettings() {
                 <h2 className="text-xl font-semibold">Project-scoped access</h2>
                 <p className="text-sm text-muted-foreground">
                   Create scoped credentials for external systems without mixing them into the main settings form.
-                  {' '}<a href="https://github.com/darkspock/GoSnag/blob/main/API.md" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">API documentation &rarr;</a>
+                  {' '}<a href="https://github.com/darkspock/gosnag/blob/main/docs/API.md" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">API documentation &rarr;</a>
                 </p>
               </div>
 
@@ -1519,7 +2514,11 @@ export default function ProjectSettings() {
                             )}
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {r.rule_type === 'ai_prompt' ? (
+                            {r.conditions && (r.conditions as ConditionGroup).conditions?.length > 0 ? (
+                              <>
+                                {(r.conditions as ConditionGroup).conditions.length} condition{(r.conditions as ConditionGroup).conditions.length !== 1 ? 's' : ''} ({(r.conditions as ConditionGroup).operator?.toUpperCase()})
+                              </>
+                            ) : r.rule_type === 'ai_prompt' ? (
                               <>
                                 <span className="inline-flex items-center gap-1 rounded bg-purple-500/15 text-purple-400 px-1.5 py-0.5 mr-1">
                                   <Sparkles className="h-3 w-3" /> AI
@@ -1624,6 +2623,17 @@ export default function ProjectSettings() {
                           ? 'Maximum points the AI can assign. AI returns between -points and +points.'
                           : 'Positive = higher priority, negative = lower. Base score is 50, clamped to 0\u2013100.'}
                       </p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Advanced conditions</label>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Optional. If you add conditions here, they decide the match and the simple type/pattern fields above are ignored for matching.
+                      </p>
+                      <ConditionBuilder
+                        value={prConditions}
+                        onChange={setPrConditions}
+                        availableTypes={['level', 'platform', 'title', 'total_events', 'velocity_1h', 'velocity_24h', 'user_count', 'has_app_frame']}
+                      />
                     </div>
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" onClick={() => setShowPriorityRuleForm(false)}>Cancel</Button>
@@ -2033,7 +3043,7 @@ export default function ProjectSettings() {
                         />
                         <div>
                           <span className="text-sm font-medium">Root Cause Analysis</span>
-                          <p className="text-xs text-muted-foreground">AI-generated root cause analysis for issues (Phase 2).</p>
+                          <p className="text-xs text-muted-foreground">AI-generated root cause analysis for issues.</p>
                         </div>
                       </label>
                     </CardContent>
@@ -2703,9 +3713,20 @@ export default function ProjectSettings() {
               <Input
                 value={alertConfig}
                 onChange={e => setAlertConfig(e.target.value)}
-                placeholder={alertType === 'email' ? 'dev@example.com, ops@example.com' : 'https://hooks.slack.com/...'}
+                placeholder={
+                  alertType === 'email'
+                    ? 'dev@example.com, ops@example.com'
+                    : selectedGroup?.default_slack_webhook_url_set
+                      ? 'Optional: leave empty to use the group default webhook'
+                      : 'https://hooks.slack.com/...'
+                }
                 className="mt-1"
               />
+              {alertType === 'slack' && selectedGroup?.default_slack_webhook_url_set && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  This project&apos;s group already has a shared Slack webhook. Leave this blank to use it, or enter one here to override it for this alert.
+                </p>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium">Conditions</label>
@@ -2713,7 +3734,7 @@ export default function ProjectSettings() {
               <ConditionBuilder
                 value={alertConditions}
                 onChange={setAlertConditions}
-                availableTypes={['level', 'platform', 'title', 'total_events', 'velocity_1h', 'velocity_24h', 'user_count']}
+                availableTypes={['level', 'platform', 'title', 'total_events', 'velocity_1h', 'velocity_24h', 'user_count', 'has_app_frame']}
               />
             </div>
             <div className="flex justify-end gap-2">

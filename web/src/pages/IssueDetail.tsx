@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/lib/use-auth'
-import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket, type SuspectCommit, type ReleaseInfo, type MergeSuggestion, type AIAnalysis } from '@/lib/api'
+import { api, type Issue, type Event, type User, type Project, type IssueTag, type IssueComment, type Ticket, type SuspectCommit, type ReleaseInfo, type MergeSuggestion, type AIAnalysis, type BreadcrumbValue, type DBQueryAnalysis } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
@@ -16,6 +16,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { IssueDetailSkeleton } from '@/components/ui/skeleton'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
 import { useKeyboardShortcut } from '@/lib/use-keyboard'
+import { classifyStackFrame } from '@/lib/stacktrace-rules'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -203,7 +204,7 @@ export default function IssueDetail() {
     }
   }
 
-  const updateStatus = async (status: string, cooldown?: number) => {
+  const updateStatus = useCallback(async (status: string, cooldown?: number) => {
     if (!projectId || !issueId) return
     const data: { status: string; cooldown_minutes?: number } = { status }
     if (cooldown && cooldown > 0) data.cooldown_minutes = cooldown
@@ -211,7 +212,7 @@ export default function IssueDetail() {
     setIssue(updated)
     const labels: Record<string, string> = { resolved: 'Issue resolved', ignored: 'Issue ignored', open: 'Issue reopened', snoozed: 'Issue snoozed' }
     toast.success(labels[status] || `Status changed to ${status}`)
-  }
+  }, [projectId, issueId])
 
   const cooldownOptions = [
     {
@@ -327,7 +328,7 @@ export default function IssueDetail() {
     s: () => { if (isActionable) setShowSnooze(true) },
     i: () => { if (isActionable && isErrorLevel) updateStatus('ignored') },
     escape: () => { if (projectId) navigate(`/projects/${projectId}`) },
-  }), [isActionable, isErrorLevel, projectId])
+  }), [isActionable, isErrorLevel, navigate, projectId, updateStatus])
 
   useKeyboardShortcut(shortcuts)
 
@@ -339,6 +340,7 @@ export default function IssueDetail() {
     <div>
       <Breadcrumb items={[
         { label: 'Projects', to: '/' },
+        ...(project?.group_name && project?.group_id ? [{ label: project.group_name, to: `/?group=${project.group_id}` }] : []),
         { label: project?.name || 'Issues', to: `/projects/${projectId}` },
         { label: issue.title },
       ]} />
@@ -682,7 +684,14 @@ export default function IssueDetail() {
               </div>
             </div>
             <div className="px-4 pb-4">
-              <EventData data={events[0].data} project={project} />
+              <EventData
+                data={events[0].data}
+                project={project}
+                projectId={projectId}
+                issueId={issueId}
+                issueCulprit={issue?.culprit}
+                isAdmin={currentUser?.role === 'admin'}
+              />
             </div>
           </div>
         </>
@@ -966,7 +975,14 @@ export default function IssueDetail() {
                     <Copy className="h-3.5 w-3.5 mr-1" /> Copy full
                   </Button>
                 </div>
-                <EventData data={event.data} project={project} />
+                <EventData
+                  data={event.data}
+                  project={project}
+                  projectId={projectId}
+                  issueId={issueId}
+                  issueCulprit={issue?.culprit}
+                  isAdmin={currentUser?.role === 'admin'}
+                />
               </div>
             )}
           </div>
@@ -1129,31 +1145,85 @@ function buildSourceURL(filename: string, lineno: number, project: Project | nul
   return null
 }
 
-function ExceptionSection({ exception, project }: { exception: { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<{ filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }> } }> }; project: Project | null }) {
+type StacktraceFrame = { filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }
+type ClassifiedStacktraceFrame = StacktraceFrame & { kind: 'app' | 'framework' | 'external' }
+
+function pickRelevantFrames(frames: ClassifiedStacktraceFrame[]): ClassifiedStacktraceFrame[] {
+  const appFrames = frames.filter(frame => frame.kind === 'app')
+  if (appFrames.length > 0) return appFrames.slice(0, 3)
+
+  const frameworkFrames = frames.filter(frame => frame.kind === 'framework')
+  if (frameworkFrames.length > 0) return frameworkFrames.slice(0, 3)
+
+  return frames.slice(0, 3)
+}
+
+function ExceptionSection({ exception, project }: { exception: { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<StacktraceFrame> } }> }; project: Project | null }) {
   if (!exception?.values) return null
   return (
     <div className="space-y-4">
       <SectionHeader title="Exception" />
       {exception.values.map((exc, i) => (
-        <div key={i} className="rounded-lg border border-border/60 overflow-hidden">
-          <div className="px-4 py-3 bg-red-500/5 border-b border-red-500/10">
-            <span className="font-mono text-sm font-bold text-red-400">{exc.type}</span>
-            <span className="font-mono text-sm text-red-300/70">: {exc.value}</span>
+        <ExceptionCard key={i} exception={exc} project={project} />
+      ))}
+    </div>
+  )
+}
+
+function ExceptionCard({ exception, project }: { exception: { type: string; value: string; stacktrace?: { frames?: Array<StacktraceFrame> } }; project: Project | null }) {
+  const [showAllFrames, setShowAllFrames] = useState(false)
+  const classifiedFrames = (exception.stacktrace?.frames || []).slice().reverse().map(frame => ({
+    ...frame,
+    kind: classifyStackFrame(frame.filename, project?.stacktrace_rules, frame.in_app),
+  }))
+  const visibleFrames = showAllFrames ? classifiedFrames : pickRelevantFrames(classifiedFrames)
+  const hiddenFrames = Math.max(classifiedFrames.length - visibleFrames.length, 0)
+  const counts = {
+    app: classifiedFrames.filter(frame => frame.kind === 'app').length,
+    framework: classifiedFrames.filter(frame => frame.kind === 'framework').length,
+    external: classifiedFrames.filter(frame => frame.kind === 'external').length,
+  }
+
+  return (
+    <div className="rounded-lg border border-border/60 overflow-hidden">
+      <div className="px-4 py-3 bg-red-500/5 border-b border-red-500/10">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-sm font-bold text-red-400">{exception.type}</span>
+          <span className="font-mono text-sm text-red-300/70 break-all">: {exception.value}</span>
+        </div>
+      </div>
+      {classifiedFrames.length > 0 && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/40 bg-background/40 px-4 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">App {counts.app}</Badge>
+              <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-300">Framework {counts.framework}</Badge>
+              <Badge variant="outline" className="border-slate-500/30 bg-slate-500/10 text-slate-300">External {counts.external}</Badge>
+              {!showAllFrames && hiddenFrames > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Showing the most relevant frames first
+                </span>
+              )}
+            </div>
+            {hiddenFrames > 0 && (
+              <Button variant="ghost" size="sm" onClick={() => setShowAllFrames(v => !v)}>
+                {showAllFrames ? 'Show relevant only' : `Show full stacktrace (${hiddenFrames} hidden)`}
+              </Button>
+            )}
           </div>
-          {exc.stacktrace?.frames && (
-            <div className="bg-[#0d1117] overflow-x-auto">
-              <table className="w-full text-xs font-mono">
-                <tbody>
-                  {[...exc.stacktrace.frames].reverse().map((frame, j) => {
-                    const sourceUrl = buildSourceURL(frame.filename, frame.lineno, project)
-                    return (
+          <div className="bg-[#0d1117] overflow-x-auto">
+            <table className="w-full text-xs font-mono">
+              <tbody>
+                {visibleFrames.map((frame, j) => {
+                  const sourceUrl = buildSourceURL(frame.filename, frame.lineno, project)
+                  return (
                     <tr
-                      key={j}
+                      key={`${frame.filename}:${frame.lineno}:${j}`}
                       className={cn(
                         'border-l-2 transition-colors hover:bg-white/[0.02]',
-                        frame.in_app
-                          ? 'border-l-primary bg-primary/[0.03] text-foreground'
-                          : 'border-l-transparent text-muted-foreground'
+                        frame.kind === 'app' && 'border-l-primary bg-primary/[0.05] text-foreground',
+                        frame.kind === 'framework' && 'border-l-amber-500/70 bg-amber-500/[0.04] text-foreground/85',
+                        frame.kind === 'external' && 'border-l-transparent text-muted-foreground'
                       )}
                     >
                       <td className="px-3 py-1.5 text-right text-muted-foreground/40 select-none w-12 shrink-0">
@@ -1162,13 +1232,23 @@ function ExceptionSection({ exception, project }: { exception: { values?: Array<
                       <td className="px-3 py-1.5">
                         {sourceUrl ? (
                           <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                            <span className="text-primary/70">{frame.filename}</span>
+                            <span className={cn(
+                              frame.kind === 'app' && 'text-primary/80',
+                              frame.kind === 'framework' && 'text-amber-200/80',
+                              frame.kind === 'external' && 'text-muted-foreground'
+                            )}>
+                              {frame.filename}
+                            </span>
                           </a>
                         ) : (
-                          <span className="text-muted-foreground">{frame.filename}</span>
+                          <span className={frame.kind === 'external' ? 'text-muted-foreground' : 'text-foreground/80'}>{frame.filename}</span>
                         )}
                         <span className="text-muted-foreground/40"> in </span>
-                        <span className={frame.in_app ? 'text-primary font-semibold' : 'text-foreground/60'}>
+                        <span className={cn(
+                          frame.kind === 'app' && 'text-primary font-semibold',
+                          frame.kind === 'framework' && 'text-amber-200 font-medium',
+                          frame.kind === 'external' && 'text-foreground/60'
+                        )}>
                           {frame.function}
                         </span>
                         {sourceUrl && (
@@ -1178,14 +1258,13 @@ function ExceptionSection({ exception, project }: { exception: { values?: Array<
                         )}
                       </td>
                     </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      ))}
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -1202,18 +1281,263 @@ const BREADCRUMB_COLORS: Record<string, string> = {
   log: 'text-slate-400',
 }
 
-function BreadcrumbsSection({ breadcrumbs }: { breadcrumbs: { values?: Array<{ type?: string; category?: string; message?: string; data?: Record<string, unknown>; level?: string; timestamp?: string | number }> } }) {
-  const values = breadcrumbs?.values
-  if (!values?.length) return null
+function formatDuration(ms?: number | null) {
+  if (ms == null || Number.isNaN(ms)) return '—'
+  if (ms < 1) return `${ms.toFixed(2)}ms`
+  if (ms < 10) return `${ms.toFixed(2)}ms`
+  if (ms < 100) return `${ms.toFixed(1)}ms`
+  return `${Math.round(ms)}ms`
+}
+
+function getSQLDuration(data?: Record<string, unknown>) {
+  const raw = data?.duration_ms
+  if (typeof raw === 'number') return raw
+  if (typeof raw === 'string') {
+    const value = Number(raw)
+    return Number.isFinite(value) ? value : null
+  }
+  return null
+}
+
+function hasDBQueryBreadcrumbs(values?: BreadcrumbValue[]) {
+  return !!values?.some(crumb => {
+    const category = (crumb.category || crumb.type || '').toLowerCase()
+    return category.includes('db.query') || category === 'query'
+  })
+}
+
+const SQL_PREVIEW_LIMIT = 900
+
+function truncateSQLPreview(sql?: string) {
+  if (!sql) return ''
+  const normalized = sql.trim()
+  if (normalized.length <= SQL_PREVIEW_LIMIT) return normalized
+  return `${normalized.slice(0, SQL_PREVIEW_LIMIT)}...`
+}
+
+function BreadcrumbsSection({
+  breadcrumbs,
+  project,
+  projectId,
+  issueId,
+  isAdmin,
+}: {
+  breadcrumbs: { values?: BreadcrumbValue[] }
+  project?: Project | null
+  projectId?: string
+  issueId?: string
+  isAdmin?: boolean
+}) {
+  const values = breadcrumbs?.values || []
+  const [analysis, setAnalysis] = useState<DBQueryAnalysis | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [expandedSQL, setExpandedSQL] = useState<string | null>(null)
+  const sqlBreadcrumbs = hasDBQueryBreadcrumbs(values)
+
+  const normalizeDBQueryAnalysis = (value: DBQueryAnalysis): DBQueryAnalysis => ({
+    ...value,
+    queries: Array.isArray(value.queries)
+      ? value.queries.map(query => ({
+          ...query,
+          explain_warnings: Array.isArray(query.explain_warnings) ? query.explain_warnings : [],
+        }))
+      : [],
+    warnings: Array.isArray(value.warnings) ? value.warnings : [],
+  })
+
+  if (!values.length) return null
+
+  const handleAnalyzeQueries = async () => {
+    if (!projectId || !issueId || !values?.length) return
+    setAnalyzing(true)
+    try {
+      const result = await api.analyzeIssueDBQueries(projectId, issueId)
+      setAnalysis(normalizeDBQueryAnalysis(result))
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to analyze SQL breadcrumbs')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const handleExplainQuery = async (normalizedSQL: string) => {
+    if (!projectId || !issueId || !analysis) return
+    try {
+      const result = await api.explainIssueDBQuery(projectId, issueId, { normalized_sql: normalizedSQL })
+      setAnalysis(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          summary: {
+            ...prev.summary,
+            explain_attempted: prev.summary.explain_attempted + 1,
+            explain_completed: prev.summary.explain_completed + (result.plan ? 1 : 0),
+          },
+          queries: prev.queries.map(query =>
+            query.normalized_sql === normalizedSQL
+              ? {
+                  ...query,
+                  explain_plan: result.plan,
+                  explain_error: result.error,
+                  explain_warnings: Array.isArray(result.warnings) ? result.warnings : [],
+                }
+              : query
+          ),
+        }
+      })
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to run EXPLAIN')
+    }
+  }
+
+  const handleCopySQL = async (sql: string) => {
+    try {
+      await navigator.clipboard.writeText(sql)
+      toast.success('SQL copied to clipboard')
+    } catch {
+      toast.error('Failed to copy SQL')
+    }
+  }
+
   return (
     <div>
-      <SectionHeader title="Breadcrumbs" count={values.length} />
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <SectionHeader title="Breadcrumbs" count={values.length} />
+        {sqlBreadcrumbs && (
+          <div className="flex items-center gap-2">
+            {project && !(project.analysis_db_enabled && project.analysis_db_configured) && (
+              <span className="text-xs text-muted-foreground">
+                Configure Database Analysis in Project Settings to enable query analysis.
+              </span>
+            )}
+            {!isAdmin && (
+              <span className="text-xs text-muted-foreground">
+                SQL analysis is restricted to admins.
+              </span>
+            )}
+            <Button
+              size="sm"
+              variant={analysis ? 'outline' : 'default'}
+              onClick={handleAnalyzeQueries}
+              disabled={analyzing || !projectId || !issueId || !project?.analysis_db_enabled || !project?.analysis_db_configured || !isAdmin}
+            >
+              {analyzing ? 'Analyzing...' : analysis ? 'Reanalyze SQL' : 'Analyze SQL'}
+            </Button>
+          </div>
+        )}
+      </div>
+      {analysis && (
+        <div className="mb-4 rounded-lg border border-border/60 bg-accent/20 p-4">
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Badge variant="outline">{analysis.summary.query_count} queries</Badge>
+            <Badge variant="outline">{analysis.summary.unique_query_count} unique</Badge>
+            <Badge variant="outline">{formatDuration(analysis.summary.total_duration_ms)} total</Badge>
+            <Badge variant="outline">Timing {analysis.summary.timing_availability}</Badge>
+            {analysis.summary.n_plus_one_candidates > 0 && (
+              <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-300">
+                {analysis.summary.n_plus_one_candidates} N+1 candidates
+              </Badge>
+            )}
+            {analysis.summary.missing_timing_count > 0 && (
+              <Badge variant="outline" className="border-slate-500/40 bg-slate-500/10 text-slate-300">
+                {analysis.summary.missing_timing_count} without timing
+              </Badge>
+            )}
+            {analysis.summary.explain_attempted > 0 && (
+              <Badge variant="outline">
+                Explain {analysis.summary.explain_completed}/{analysis.summary.explain_attempted}
+              </Badge>
+            )}
+          </div>
+          {analysis.warnings.length > 0 && (
+            <div className="mb-3 space-y-1">
+              {analysis.warnings.map((warning, index) => (
+                <p key={index} className="text-xs text-muted-foreground">{warning}</p>
+              ))}
+            </div>
+          )}
+          <div className="space-y-3">
+            {analysis.queries.slice(0, 8).map((query, index) => (
+              <div key={`${query.normalized_sql}-${index}`} className="rounded-md border border-border/50 bg-background/60 p-3">
+                <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{query.query_type}</Badge>
+                    {query.likely_entity && <Badge variant="outline">{query.likely_entity}</Badge>}
+                    <Badge variant="outline">{query.count}x</Badge>
+                    <Badge variant="outline">{formatDuration(query.total_duration_ms)} total</Badge>
+                    <Badge variant="outline">{formatDuration(query.avg_duration_ms)} avg</Badge>
+                    {query.suspected_n_plus_one && (
+                      <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-300">
+                        N+1 candidate
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => handleCopySQL(query.sample_sql)}>
+                      <Copy className="mr-1 h-3.5 w-3.5" /> Copy
+                    </Button>
+                    {query.sample_sql.length > SQL_PREVIEW_LIMIT && (
+                      <Button size="sm" variant="outline" onClick={() => setExpandedSQL(query.sample_sql)}>
+                        View full query
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <pre className="overflow-x-auto rounded-md bg-[#0d1117] p-3 text-xs font-mono text-foreground/80">
+                  {truncateSQLPreview(query.sample_sql)}
+                </pre>
+                {query.query_type === 'select' && isAdmin && project?.analysis_db_enabled && project?.analysis_db_configured && (
+                  <div className="mt-2 flex justify-end">
+                    <Button size="sm" variant="outline" onClick={() => handleExplainQuery(query.normalized_sql)}>
+                      {query.explain_plan || query.explain_error ? 'Run EXPLAIN Again' : 'Run EXPLAIN'}
+                    </Button>
+                  </div>
+                )}
+                {(query.explain_plan || query.explain_error) && (
+                  <div className="mt-2">
+                    <p className="mb-1 text-xs text-muted-foreground">Explain</p>
+                    <pre className="overflow-x-auto rounded-md bg-[#0d1117] p-3 text-xs font-mono text-foreground/70">
+                      {query.explain_plan || query.explain_error}
+                    </pre>
+                    {!!query.explain_warnings?.length && (
+                      <div className="mt-2 space-y-1">
+                        {query.explain_warnings.map((warning, warnIndex) => (
+                          <p key={warnIndex} className="text-xs text-muted-foreground">{warning}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <Dialog open={!!expandedSQL} onOpenChange={open => { if (!open) setExpandedSQL(null) }}>
+        <DialogContent className="h-[90vh] max-h-[90vh] w-[96vw] max-w-[1400px]">
+          <DialogTitle>Full SQL Query</DialogTitle>
+          <DialogDescription>
+            Review and copy the full query text.
+          </DialogDescription>
+          <div className="mt-4 flex min-h-0 flex-1 flex-col">
+            <div className="mb-3 flex justify-end">
+              <Button type="button" variant="outline" onClick={() => expandedSQL && handleCopySQL(expandedSQL)}>
+                <Copy className="mr-1 h-3.5 w-3.5" /> Copy
+              </Button>
+            </div>
+            <pre className="min-h-0 flex-1 overflow-auto rounded-md bg-[#0d1117] p-4 text-xs font-mono text-foreground/80">
+              {expandedSQL}
+            </pre>
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="rounded-lg border border-border/60 overflow-hidden bg-[#0d1117]">
         <table className="w-full text-xs font-mono">
           <thead>
             <tr className="border-b border-border/40 text-muted-foreground/60">
               <th className="px-3 py-2 text-left w-[140px]">Time</th>
               <th className="px-3 py-2 text-left w-[100px]">Category</th>
+              <th className="px-3 py-2 text-left w-[90px]">Duration</th>
               <th className="px-3 py-2 text-left">Message / Data</th>
               <th className="px-3 py-2 text-left w-[60px]">Level</th>
             </tr>
@@ -1229,11 +1553,15 @@ function BreadcrumbsSection({ breadcrumbs }: { breadcrumbs: { values?: Array<{ t
               const colorKey = cat.includes('query') ? 'query' : cat.includes('http') ? 'http' : cat.includes('navigation') ? 'navigation' : crumb.level || 'default'
               const color = BREADCRUMB_COLORS[colorKey] || BREADCRUMB_COLORS.default
               const message = crumb.message || (crumb.data ? JSON.stringify(crumb.data) : '')
+              const duration = getSQLDuration(crumb.data)
               return (
                 <tr key={i} className="border-b border-border/20 hover:bg-white/[0.02] transition-colors">
                   <td className="px-3 py-1.5 text-muted-foreground/50 whitespace-nowrap">{ts}</td>
                   <td className={cn('px-3 py-1.5 whitespace-nowrap', color)}>{cat}</td>
-                  <td className="px-3 py-1.5 text-foreground/80 break-all">{message}</td>
+                  <td className="px-3 py-1.5 text-muted-foreground/60 whitespace-nowrap">{duration == null ? '—' : formatDuration(duration)}</td>
+                  <td className="px-3 py-1.5 text-foreground/80 break-all">
+                    <pre className="whitespace-pre-wrap break-all font-mono text-xs text-inherit">{message}</pre>
+                  </td>
                   <td className="px-3 py-1.5 text-muted-foreground/50">{crumb.level}</td>
                 </tr>
               )
@@ -1245,8 +1573,39 @@ function BreadcrumbsSection({ breadcrumbs }: { breadcrumbs: { values?: Array<{ t
   )
 }
 
-function RequestSection({ request }: { request: { method?: string; url?: string; headers?: Record<string, string>; query_string?: string; data?: unknown; env?: Record<string, string> } }) {
+function extractRequestPath(url?: string) {
+  if (!url) return ''
+  try {
+    return new URL(url).pathname || ''
+  } catch {
+    const match = url.match(/^[A-Za-z]+:\/\/[^/]+(\/[^?#]*)/)
+    if (match?.[1]) return match[1]
+    return url.startsWith('/') ? url : ''
+  }
+}
+
+function extractCanonicalPath(culprit?: string, method?: string) {
+  const trimmed = culprit?.trim() || ''
+  if (!trimmed) return ''
+  const normalizedMethod = (method || '').trim().toUpperCase()
+  if (normalizedMethod && trimmed.toUpperCase().startsWith(`${normalizedMethod} `)) {
+    return trimmed.slice(normalizedMethod.length + 1).trim()
+  }
+  return trimmed.startsWith('/') ? trimmed : ''
+}
+
+function RequestSection({
+  request,
+  canonicalRoute,
+}: {
+  request: { method?: string; url?: string; headers?: Record<string, string>; query_string?: string; data?: unknown; env?: Record<string, string> }
+  canonicalRoute?: string
+}) {
   if (!request) return null
+  const rawPath = extractRequestPath(request.url)
+  const canonicalPath = extractCanonicalPath(canonicalRoute, request.method)
+  const showCanonicalRoute = !!rawPath && !!canonicalPath && rawPath !== canonicalPath
+
   return (
     <div>
       <SectionHeader title="Request" />
@@ -1259,6 +1618,13 @@ function RequestSection({ request }: { request: { method?: string; url?: string;
             {request.url && (
               <span className="font-mono text-sm text-blue-300/70 break-all">{request.url}</span>
             )}
+          </div>
+        )}
+        {showCanonicalRoute && (
+          <div className="px-4 py-3 border-b border-emerald-500/10 bg-emerald-500/5">
+            <p className="text-xs text-emerald-300/80">
+              Route grouping normalized this request to <span className="font-mono">{request.method ? `${request.method} ${canonicalPath}` : canonicalPath}</span>
+            </p>
           </div>
         )}
         <div className="bg-[#0d1117] divide-y divide-border/20">
@@ -1429,11 +1795,25 @@ function formatEventSummary(data: Record<string, unknown>): string {
   return lines.join('\n')
 }
 
-function EventData({ data, project }: { data: Record<string, unknown>; project?: Project | null }) {
+function EventData({
+  data,
+  project,
+  projectId,
+  issueId,
+  issueCulprit,
+  isAdmin,
+}: {
+  data: Record<string, unknown>
+  project?: Project | null
+  projectId?: string
+  issueId?: string
+  issueCulprit?: string
+  isAdmin?: boolean
+}) {
   const [activeTab, setActiveTab] = useState('')
   const exception = data.exception as { values?: Array<{ type: string; value: string; stacktrace?: { frames?: Array<{ filename: string; function: string; lineno: number; colno?: number; in_app?: boolean }> } }> } | undefined
   const request = data.request as { method?: string; url?: string; headers?: Record<string, string>; query_string?: string; data?: unknown; env?: Record<string, string> } | undefined
-  const breadcrumbs = data.breadcrumbs as { values?: Array<{ type?: string; category?: string; message?: string; data?: Record<string, unknown>; level?: string; timestamp?: string | number }> } | undefined
+  const breadcrumbs = data.breadcrumbs as { values?: BreadcrumbValue[] } | undefined
   const tags = data.tags as Record<string, string> | Array<[string, string]> | undefined
   const contexts = data.contexts as Record<string, Record<string, unknown>> | undefined
   const user = data.user as { id?: string; email?: string; username?: string; ip_address?: string; [key: string]: unknown } | undefined
@@ -1480,10 +1860,18 @@ function EventData({ data, project }: { data: Record<string, unknown>; project?:
         ))}
       </div>
       {current === 'stacktrace' && exception && <ExceptionSection exception={exception} project={project || null} />}
-      {current === 'request' && request && <RequestSection request={request} />}
+      {current === 'request' && request && <RequestSection request={request} canonicalRoute={project?.route_grouping_enabled ? issueCulprit : ''} />}
       {current === 'user' && user && <UserSection user={user} />}
       {current === 'context' && contexts && <ContextsSection contexts={contexts} />}
-      {current === 'breadcrumbs' && breadcrumbs && <BreadcrumbsSection breadcrumbs={breadcrumbs} />}
+      {current === 'breadcrumbs' && breadcrumbs && (
+        <BreadcrumbsSection
+          breadcrumbs={breadcrumbs}
+          project={project}
+          projectId={projectId}
+          issueId={issueId}
+          isAdmin={isAdmin}
+        />
+      )}
       {current === 'tags' && tags && <TagsSection tags={tags} />}
       {current === 'raw' && (
         <pre className="bg-[#0d1117] rounded-lg p-4 text-xs font-mono overflow-x-auto max-h-96 text-foreground/80 border border-border/60">

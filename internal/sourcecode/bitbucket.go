@@ -29,6 +29,14 @@ func (b *BitbucketProvider) FileURL(path string, line int, commitOrBranch string
 	return u
 }
 
+func (b *BitbucketProvider) GetFile(ctx context.Context, path string, ref string) ([]byte, error) {
+	cleanPath := b.cfg.StripPath(path)
+	if ref == "" {
+		ref = b.cfg.DefaultBranch
+	}
+	return b.apiGet(ctx, fmt.Sprintf("/2.0/repositories/%s/%s/src/%s/%s", b.cfg.Owner, b.cfg.Name, ref, cleanPath))
+}
+
 func (b *BitbucketProvider) GetCommitsForFiles(ctx context.Context, files []string, since time.Time) ([]Commit, error) {
 	seen := map[string]bool{}
 	var commits []Commit

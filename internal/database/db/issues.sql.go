@@ -440,6 +440,29 @@ func (q *Queries) GetIssueCountsByStatus(ctx context.Context, arg GetIssueCounts
 	return items, nil
 }
 
+const hasReachedInfoIssueLimit = `-- name: HasReachedInfoIssueLimit :one
+SELECT EXISTS (
+  SELECT 1
+  FROM issues
+  WHERE project_id = $1
+    AND level IN ('info', 'debug')
+  OFFSET GREATEST($2::int - 1, 0)
+  LIMIT 1
+)
+`
+
+type HasReachedInfoIssueLimitParams struct {
+	ProjectID     uuid.UUID `json:"project_id"`
+	MaxInfoIssues int32     `json:"max_info_issues"`
+}
+
+func (q *Queries) HasReachedInfoIssueLimit(ctx context.Context, arg HasReachedInfoIssueLimitParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, hasReachedInfoIssueLimit, arg.ProjectID, arg.MaxInfoIssues)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const isFollowingIssue = `-- name: IsFollowingIssue :one
 SELECT EXISTS(SELECT 1 FROM issue_follows WHERE user_id = $1 AND issue_id = $2)::bool AS following
 `

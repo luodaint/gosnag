@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -25,81 +26,199 @@ func NewHandler(queries *db.Queries, cache *StatsCache) *Handler {
 }
 
 type CreateProjectRequest struct {
-	Name                   string  `json:"name"`
-	Slug                   string  `json:"slug"`
-	DefaultCooldownMinutes *int32  `json:"default_cooldown_minutes,omitempty"`
-	WarningAsError         *bool   `json:"warning_as_error,omitempty"`
-	MaxEventsPerIssue      *int32  `json:"max_events_per_issue,omitempty"`
-	Icon                   *string `json:"icon,omitempty"`
-	Color                  *string `json:"color,omitempty"`
-	IssueDisplayMode       string  `json:"issue_display_mode"`
-	JiraBaseURL            string  `json:"jira_base_url"`
-	JiraEmail              string  `json:"jira_email"`
-	JiraAPIToken           string  `json:"jira_api_token"`
-	JiraProjectKey         string  `json:"jira_project_key"`
-	JiraIssueType          string  `json:"jira_issue_type"`
-	GithubToken            string  `json:"github_token"`
-	GithubOwner            string  `json:"github_owner"`
-	GithubRepo             string  `json:"github_repo"`
-	GithubLabels           string  `json:"github_labels"`
-	WorkflowMode           string  `json:"workflow_mode"`
-	RepoProvider           string  `json:"repo_provider"`
-	RepoOwner              string  `json:"repo_owner"`
-	RepoName               string  `json:"repo_name"`
-	RepoDefaultBranch      string  `json:"repo_default_branch"`
-	RepoToken              string  `json:"repo_token"`
-	RepoPathStrip          string  `json:"repo_path_strip"`
-	GroupID                *string `json:"group_id,omitempty"`
-	AIEnabled              *bool   `json:"ai_enabled,omitempty"`
-	AIModel                string  `json:"ai_model"`
-	AIMergeSuggestions     *bool   `json:"ai_merge_suggestions,omitempty"`
-	AIAutoMerge            *bool   `json:"ai_auto_merge,omitempty"`
-	AIAnomalyDetection     *bool   `json:"ai_anomaly_detection,omitempty"`
-	AITicketDescription    *bool   `json:"ai_ticket_description,omitempty"`
-	AIRootCause            *bool   `json:"ai_root_cause,omitempty"`
-	AITriage               *bool   `json:"ai_triage,omitempty"`
+	Name                   string           `json:"name"`
+	Slug                   string           `json:"slug"`
+	DefaultCooldownMinutes *int32           `json:"default_cooldown_minutes,omitempty"`
+	WarningAsError         *bool            `json:"warning_as_error,omitempty"`
+	MaxEventsPerIssue      *int32           `json:"max_events_per_issue,omitempty"`
+	MaxInfoIssues          *int32           `json:"max_info_issues,omitempty"`
+	Icon                   *string          `json:"icon,omitempty"`
+	Color                  *string          `json:"color,omitempty"`
+	IssueDisplayMode       string           `json:"issue_display_mode"`
+	ErrorGroupingMode      string           `json:"error_grouping_mode"`
+	WarningGroupingMode    string           `json:"warning_grouping_mode"`
+	InfoGroupingMode       string           `json:"info_grouping_mode"`
+	JiraBaseURL            string           `json:"jira_base_url"`
+	JiraEmail              string           `json:"jira_email"`
+	JiraAPIToken           string           `json:"jira_api_token"`
+	JiraProjectKey         string           `json:"jira_project_key"`
+	JiraIssueType          string           `json:"jira_issue_type"`
+	GithubToken            string           `json:"github_token"`
+	GithubOwner            string           `json:"github_owner"`
+	GithubRepo             string           `json:"github_repo"`
+	GithubLabels           string           `json:"github_labels"`
+	WorkflowMode           string           `json:"workflow_mode"`
+	RepoProvider           string           `json:"repo_provider"`
+	RepoOwner              string           `json:"repo_owner"`
+	RepoName               string           `json:"repo_name"`
+	RepoDefaultBranch      string           `json:"repo_default_branch"`
+	RepoToken              string           `json:"repo_token"`
+	RepoPathStrip          string           `json:"repo_path_strip"`
+	GroupID                *string          `json:"group_id,omitempty"`
+	AIEnabled              *bool            `json:"ai_enabled,omitempty"`
+	AIModel                string           `json:"ai_model"`
+	AIMergeSuggestions     *bool            `json:"ai_merge_suggestions,omitempty"`
+	AIAutoMerge            *bool            `json:"ai_auto_merge,omitempty"`
+	AIAnomalyDetection     *bool            `json:"ai_anomaly_detection,omitempty"`
+	AITicketDescription    *bool            `json:"ai_ticket_description,omitempty"`
+	AIRootCause            *bool            `json:"ai_root_cause,omitempty"`
+	AITriage               *bool            `json:"ai_triage,omitempty"`
+	StacktraceRules        *StacktraceRules `json:"stacktrace_rules,omitempty"`
+	AnalysisDBEnabled      *bool            `json:"analysis_db_enabled,omitempty"`
+	AnalysisDBDriver       *string          `json:"analysis_db_driver,omitempty"`
+	AnalysisDBDSN          *string          `json:"analysis_db_dsn,omitempty"`
+	AnalysisDBName         *string          `json:"analysis_db_name,omitempty"`
+	AnalysisDBSchema       *string          `json:"analysis_db_schema,omitempty"`
+	AnalysisDBNotes        *string          `json:"analysis_db_notes,omitempty"`
+	Framework              *string          `json:"framework,omitempty"`
+	RouteGroupingEnabled   *bool            `json:"route_grouping_enabled,omitempty"`
+}
+
+type StacktraceRules struct {
+	Preset            string   `json:"preset"`
+	AppPatterns       []string `json:"app_patterns"`
+	FrameworkPatterns []string `json:"framework_patterns"`
+	ExternalPatterns  []string `json:"external_patterns"`
 }
 
 // SafeProject strips sensitive fields (Jira API token) from the project for API responses.
 type SafeProject struct {
-	ID                     uuid.UUID `json:"id"`
-	NumericID              int32     `json:"numeric_id"`
-	Name                   string    `json:"name"`
-	Slug                   string    `json:"slug"`
-	DefaultCooldownMinutes int32     `json:"default_cooldown_minutes"`
-	WarningAsError         bool      `json:"warning_as_error"`
-	MaxEventsPerIssue      int32     `json:"max_events_per_issue"`
-	Icon                   string    `json:"icon"`
-	Color                  string    `json:"color"`
-	Position               int32     `json:"position"`
-	JiraBaseURL            string    `json:"jira_base_url"`
-	JiraEmail              string    `json:"jira_email"`
-	JiraAPITokenSet        bool      `json:"jira_api_token_set"`
-	JiraProjectKey         string    `json:"jira_project_key"`
-	JiraIssueType          string    `json:"jira_issue_type"`
-	GithubTokenSet         bool      `json:"github_token_set"`
-	GithubOwner            string    `json:"github_owner"`
-	GithubRepo             string    `json:"github_repo"`
-	GithubLabels           string    `json:"github_labels"`
-	WorkflowMode           string    `json:"workflow_mode"`
-	RepoProvider           string    `json:"repo_provider"`
-	RepoOwner              string    `json:"repo_owner"`
-	RepoName               string    `json:"repo_name"`
-	RepoDefaultBranch      string    `json:"repo_default_branch"`
-	RepoTokenSet           bool      `json:"repo_token_set"`
-	RepoPathStrip          string    `json:"repo_path_strip"`
-	IssueDisplayMode       string    `json:"issue_display_mode"`
-	GroupID                *string   `json:"group_id"`
-	AIEnabled              bool      `json:"ai_enabled"`
-	AIModel                string    `json:"ai_model"`
-	AIMergeSuggestions     bool      `json:"ai_merge_suggestions"`
-	AIAutoMerge            bool      `json:"ai_auto_merge"`
-	AIAnomalyDetection     bool      `json:"ai_anomaly_detection"`
-	AITicketDescription    bool      `json:"ai_ticket_description"`
-	AIRootCause            bool      `json:"ai_root_cause"`
-	AITriage               bool      `json:"ai_triage"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	ID                     uuid.UUID       `json:"id"`
+	NumericID              int32           `json:"numeric_id"`
+	Name                   string          `json:"name"`
+	Slug                   string          `json:"slug"`
+	DefaultCooldownMinutes int32           `json:"default_cooldown_minutes"`
+	WarningAsError         bool            `json:"warning_as_error"`
+	MaxEventsPerIssue      int32           `json:"max_events_per_issue"`
+	MaxInfoIssues          int32           `json:"max_info_issues"`
+	Icon                   string          `json:"icon"`
+	Color                  string          `json:"color"`
+	Position               int32           `json:"position"`
+	ErrorGroupingMode      string          `json:"error_grouping_mode"`
+	WarningGroupingMode    string          `json:"warning_grouping_mode"`
+	InfoGroupingMode       string          `json:"info_grouping_mode"`
+	JiraBaseURL            string          `json:"jira_base_url"`
+	JiraEmail              string          `json:"jira_email"`
+	JiraAPITokenSet        bool            `json:"jira_api_token_set"`
+	JiraProjectKey         string          `json:"jira_project_key"`
+	JiraIssueType          string          `json:"jira_issue_type"`
+	GithubTokenSet         bool            `json:"github_token_set"`
+	GithubOwner            string          `json:"github_owner"`
+	GithubRepo             string          `json:"github_repo"`
+	GithubLabels           string          `json:"github_labels"`
+	WorkflowMode           string          `json:"workflow_mode"`
+	RepoProvider           string          `json:"repo_provider"`
+	RepoOwner              string          `json:"repo_owner"`
+	RepoName               string          `json:"repo_name"`
+	RepoDefaultBranch      string          `json:"repo_default_branch"`
+	RepoTokenSet           bool            `json:"repo_token_set"`
+	RepoPathStrip          string          `json:"repo_path_strip"`
+	IssueDisplayMode       string          `json:"issue_display_mode"`
+	GroupID                *string         `json:"group_id"`
+	GroupName              string          `json:"group_name,omitempty"`
+	AIEnabled              bool            `json:"ai_enabled"`
+	AIModel                string          `json:"ai_model"`
+	AIMergeSuggestions     bool            `json:"ai_merge_suggestions"`
+	AIAutoMerge            bool            `json:"ai_auto_merge"`
+	AIAnomalyDetection     bool            `json:"ai_anomaly_detection"`
+	AITicketDescription    bool            `json:"ai_ticket_description"`
+	AIRootCause            bool            `json:"ai_root_cause"`
+	AITriage               bool            `json:"ai_triage"`
+	StacktraceRules        StacktraceRules `json:"stacktrace_rules"`
+	AnalysisDBEnabled      bool            `json:"analysis_db_enabled"`
+	AnalysisDBConfigured   bool            `json:"analysis_db_configured"`
+	AnalysisDBDriver       string          `json:"analysis_db_driver"`
+	AnalysisDBDSNDisplay   string          `json:"analysis_db_dsn_display"`
+	AnalysisDBName         string          `json:"analysis_db_name"`
+	AnalysisDBSchema       string          `json:"analysis_db_schema"`
+	AnalysisDBNotes        string          `json:"analysis_db_notes"`
+	Framework              string          `json:"framework"`
+	RouteGroupingEnabled   bool            `json:"route_grouping_enabled"`
+	CreatedAt              time.Time       `json:"created_at"`
+	UpdatedAt              time.Time       `json:"updated_at"`
+}
+
+func defaultStacktraceRules() StacktraceRules {
+	return StacktraceRules{
+		Preset:            "generic",
+		AppPatterns:       []string{},
+		FrameworkPatterns: []string{},
+		ExternalPatterns:  []string{},
+	}
+}
+
+func normalizeIssueGroupingMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case "by_url", "by_file":
+		return strings.TrimSpace(mode)
+	default:
+		return "normal"
+	}
+}
+
+func normalizePatternList(patterns []string) []string {
+	out := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		out = append(out, pattern)
+	}
+	return out
+}
+
+func normalizeStacktraceRules(r StacktraceRules) StacktraceRules {
+	out := defaultStacktraceRules()
+	if strings.TrimSpace(r.Preset) != "" {
+		out.Preset = strings.TrimSpace(r.Preset)
+	}
+	out.AppPatterns = normalizePatternList(r.AppPatterns)
+	out.FrameworkPatterns = normalizePatternList(r.FrameworkPatterns)
+	out.ExternalPatterns = normalizePatternList(r.ExternalPatterns)
+	return out
+}
+
+func validatePatternList(label string, patterns []string) error {
+	for _, pattern := range patterns {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("invalid %s regex %q: %w", label, pattern, err)
+		}
+	}
+	return nil
+}
+
+func validateStacktraceRules(r StacktraceRules) error {
+	if err := validatePatternList("app_patterns", r.AppPatterns); err != nil {
+		return err
+	}
+	if err := validatePatternList("framework_patterns", r.FrameworkPatterns); err != nil {
+		return err
+	}
+	if err := validatePatternList("external_patterns", r.ExternalPatterns); err != nil {
+		return err
+	}
+	return nil
+}
+
+func parseStacktraceRules(raw json.RawMessage) StacktraceRules {
+	if len(raw) == 0 || string(raw) == "null" {
+		return defaultStacktraceRules()
+	}
+	var rules StacktraceRules
+	if err := json.Unmarshal(raw, &rules); err != nil {
+		return defaultStacktraceRules()
+	}
+	return normalizeStacktraceRules(rules)
+}
+
+func marshalStacktraceRules(r StacktraceRules) json.RawMessage {
+	normalized := normalizeStacktraceRules(r)
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		raw, _ = json.Marshal(defaultStacktraceRules())
+	}
+	return raw
 }
 
 func nullUUIDToStringPtr(u uuid.NullUUID) *string {
@@ -110,44 +229,58 @@ func nullUUIDToStringPtr(u uuid.NullUUID) *string {
 	return &s
 }
 
-func toSafeProject(p db.Project) SafeProject {
+func toSafeProject(p db.Project, settings ProjectSettings) SafeProject {
 	return SafeProject{
 		ID:                     p.ID,
 		NumericID:              p.NumericID,
 		Name:                   p.Name,
 		Slug:                   p.Slug,
 		DefaultCooldownMinutes: p.DefaultCooldownMinutes,
-		WarningAsError:         p.WarningAsError,
-		MaxEventsPerIssue:      p.MaxEventsPerIssue,
+		WarningAsError:         settings.WarningAsError,
+		MaxEventsPerIssue:      settings.MaxEventsPerIssue,
+		MaxInfoIssues:          settings.MaxInfoIssues,
 		Icon:                   p.Icon,
 		Color:                  p.Color,
 		Position:               p.Position,
-		JiraBaseURL:            p.JiraBaseUrl,
-		JiraEmail:              p.JiraEmail,
-		JiraAPITokenSet:        p.JiraApiToken != "",
-		JiraProjectKey:         p.JiraProjectKey,
-		JiraIssueType:          p.JiraIssueType,
-		GithubTokenSet:         p.GithubToken != "",
-		GithubOwner:            p.GithubOwner,
-		GithubRepo:             p.GithubRepo,
-		GithubLabels:           p.GithubLabels,
+		ErrorGroupingMode:      normalizeIssueGroupingMode(settings.ErrorGroupingMode),
+		WarningGroupingMode:    normalizeIssueGroupingMode(settings.WarningGroupingMode),
+		InfoGroupingMode:       normalizeIssueGroupingMode(settings.InfoGroupingMode),
+		JiraBaseURL:            settings.JiraBaseURL,
+		JiraEmail:              settings.JiraEmail,
+		JiraAPITokenSet:        settings.JiraAPIToken != "",
+		JiraProjectKey:         settings.JiraProjectKey,
+		JiraIssueType:          settings.JiraIssueType,
+		GithubTokenSet:         settings.GithubToken != "",
+		GithubOwner:            settings.GithubOwner,
+		GithubRepo:             settings.GithubRepo,
+		GithubLabels:           settings.GithubLabels,
 		WorkflowMode:           p.WorkflowMode,
-		RepoProvider:           p.RepoProvider,
-		RepoOwner:              p.RepoOwner,
-		RepoName:               p.RepoName,
-		RepoDefaultBranch:      p.RepoDefaultBranch,
-		RepoTokenSet:           p.RepoToken != "",
-		RepoPathStrip:          p.RepoPathStrip,
-		IssueDisplayMode:       p.IssueDisplayMode,
+		RepoProvider:           settings.RepoProvider,
+		RepoOwner:              settings.RepoOwner,
+		RepoName:               settings.RepoName,
+		RepoDefaultBranch:      settings.RepoDefaultBranch,
+		RepoTokenSet:           settings.RepoToken != "",
+		RepoPathStrip:          settings.RepoPathStrip,
+		IssueDisplayMode:       settings.IssueDisplayMode,
 		GroupID:                nullUUIDToStringPtr(p.GroupID),
-		AIEnabled:              p.AiEnabled,
-		AIModel:                p.AiModel,
-		AIMergeSuggestions:     p.AiMergeSuggestions,
-		AIAutoMerge:            p.AiAutoMerge,
-		AIAnomalyDetection:     p.AiAnomalyDetection,
-		AITicketDescription:    p.AiTicketDescription,
-		AIRootCause:            p.AiRootCause,
-		AITriage:               p.AiTriage,
+		AIEnabled:              settings.AIEnabled,
+		AIModel:                settings.AIModel,
+		AIMergeSuggestions:     settings.AIMergeSuggestions,
+		AIAutoMerge:            settings.AIAutoMerge,
+		AIAnomalyDetection:     settings.AIAnomalyDetection,
+		AITicketDescription:    settings.AITicketDescription,
+		AIRootCause:            settings.AIRootCause,
+		AITriage:               settings.AITriage,
+		StacktraceRules:        parseStacktraceRules(settings.StacktraceRules),
+		AnalysisDBEnabled:      settings.AnalysisDBEnabled,
+		AnalysisDBConfigured:   strings.TrimSpace(settings.AnalysisDBDSN) != "",
+		AnalysisDBDriver:       settings.AnalysisDBDriver,
+		AnalysisDBDSNDisplay:   maskedAnalysisDSN(settings.AnalysisDBDSN),
+		AnalysisDBName:         settings.AnalysisDBName,
+		AnalysisDBSchema:       settings.AnalysisDBSchema,
+		AnalysisDBNotes:        settings.AnalysisDBNotes,
+		Framework:              settings.Framework,
+		RouteGroupingEnabled:   settings.RouteGroupingEnabled,
 		CreatedAt:              p.CreatedAt,
 		UpdatedAt:              p.UpdatedAt,
 	}
@@ -185,7 +318,121 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		cooldown = *req.DefaultCooldownMinutes
 	}
 
-	project, err := h.queries.CreateProject(r.Context(), db.CreateProjectParams{
+	settings := DefaultProjectSettings()
+	if req.WarningAsError != nil {
+		settings.WarningAsError = *req.WarningAsError
+	}
+	if req.MaxEventsPerIssue != nil {
+		settings.MaxEventsPerIssue = *req.MaxEventsPerIssue
+	}
+	if req.MaxInfoIssues != nil && *req.MaxInfoIssues >= 0 {
+		settings.MaxInfoIssues = *req.MaxInfoIssues
+	}
+	if req.IssueDisplayMode != "" {
+		settings.IssueDisplayMode = req.IssueDisplayMode
+	}
+	if req.ErrorGroupingMode != "" {
+		settings.ErrorGroupingMode = normalizeIssueGroupingMode(req.ErrorGroupingMode)
+	}
+	if req.WarningGroupingMode != "" {
+		settings.WarningGroupingMode = normalizeIssueGroupingMode(req.WarningGroupingMode)
+	}
+	if req.InfoGroupingMode != "" {
+		settings.InfoGroupingMode = normalizeIssueGroupingMode(req.InfoGroupingMode)
+	}
+	settings.JiraBaseURL = req.JiraBaseURL
+	settings.JiraEmail = req.JiraEmail
+	settings.JiraAPIToken = req.JiraAPIToken
+	settings.JiraProjectKey = req.JiraProjectKey
+	if req.JiraIssueType != "" {
+		settings.JiraIssueType = req.JiraIssueType
+	}
+	settings.GithubToken = req.GithubToken
+	settings.GithubOwner = req.GithubOwner
+	settings.GithubRepo = req.GithubRepo
+	if req.GithubLabels != "" {
+		settings.GithubLabels = req.GithubLabels
+	}
+	settings.RepoProvider = req.RepoProvider
+	settings.RepoOwner = req.RepoOwner
+	settings.RepoName = req.RepoName
+	if req.RepoDefaultBranch != "" {
+		settings.RepoDefaultBranch = req.RepoDefaultBranch
+	}
+	settings.RepoToken = req.RepoToken
+	settings.RepoPathStrip = req.RepoPathStrip
+	if req.AIEnabled != nil {
+		settings.AIEnabled = *req.AIEnabled
+	}
+	if req.AIModel != "" {
+		settings.AIModel = req.AIModel
+	}
+	if req.AIMergeSuggestions != nil {
+		settings.AIMergeSuggestions = *req.AIMergeSuggestions
+	}
+	if req.AIAutoMerge != nil {
+		settings.AIAutoMerge = *req.AIAutoMerge
+	}
+	if req.AIAnomalyDetection != nil {
+		settings.AIAnomalyDetection = *req.AIAnomalyDetection
+	}
+	if req.AITicketDescription != nil {
+		settings.AITicketDescription = *req.AITicketDescription
+	}
+	if req.AIRootCause != nil {
+		settings.AIRootCause = *req.AIRootCause
+	}
+	if req.AITriage != nil {
+		settings.AITriage = *req.AITriage
+	}
+	if req.StacktraceRules != nil {
+		stacktraceRules := normalizeStacktraceRules(*req.StacktraceRules)
+		if err := validateStacktraceRules(stacktraceRules); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		settings.StacktraceRules = marshalStacktraceRules(stacktraceRules)
+	}
+	if req.AnalysisDBEnabled != nil {
+		settings.AnalysisDBEnabled = *req.AnalysisDBEnabled
+	}
+	if req.AnalysisDBDriver != nil {
+		settings.AnalysisDBDriver = strings.TrimSpace(*req.AnalysisDBDriver)
+	}
+	if req.AnalysisDBDSN != nil {
+		settings.AnalysisDBDSN = strings.TrimSpace(*req.AnalysisDBDSN)
+	}
+	if req.AnalysisDBName != nil {
+		settings.AnalysisDBName = strings.TrimSpace(*req.AnalysisDBName)
+	}
+	if req.AnalysisDBSchema != nil {
+		settings.AnalysisDBSchema = strings.TrimSpace(*req.AnalysisDBSchema)
+	}
+	if req.AnalysisDBNotes != nil {
+		settings.AnalysisDBNotes = strings.TrimSpace(*req.AnalysisDBNotes)
+	}
+	if req.Framework != nil {
+		settings.Framework = strings.TrimSpace(*req.Framework)
+	}
+	if req.RouteGroupingEnabled != nil {
+		settings.RouteGroupingEnabled = *req.RouteGroupingEnabled
+	}
+
+	rawdb, ok := h.queries.RawDB().(*sql.DB)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "project store is not transaction-capable")
+		return
+	}
+	tx, err := rawdb.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start project creation")
+		return
+	}
+	defer tx.Rollback()
+
+	txQueries := h.queries.WithTx(tx)
+
+	project, err := txQueries.CreateProject(r.Context(), db.CreateProjectParams{
 		Name:                   req.Name,
 		Slug:                   req.Slug,
 		DefaultCooldownMinutes: cooldown,
@@ -201,7 +448,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-create a default API key
 	pubKey, secKey := generateKeyPair()
-	key, err := h.queries.CreateProjectKey(r.Context(), db.CreateProjectKeyParams{
+	key, err := txQueries.CreateProjectKey(r.Context(), db.CreateProjectKeyParams{
 		ProjectID: project.ID,
 		PublicKey: pubKey,
 		SecretKey: secKey,
@@ -212,10 +459,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := saveProjectSettings(r.Context(), txQueries, project.ID, settings); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to initialize project settings")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finalize project creation")
+		return
+	}
+
 	h.cache.InvalidateSync(r.Context())
 	dsn := buildDSN(r, key.PublicKey, project.NumericID)
 	legacyDSN := buildLegacyDSN(r, key.PublicKey, project.ID)
-	writeJSON(w, http.StatusCreated, ProjectResponse{SafeProject: toSafeProject(project), DSN: dsn, LegacyDSN: legacyDSN})
+	settings.normalizeDefaults()
+	writeJSON(w, http.StatusCreated, ProjectResponse{SafeProject: toSafeProject(project, settings), DSN: dsn, LegacyDSN: legacyDSN})
 }
 
 type ProjectListItem struct {
@@ -225,8 +482,8 @@ type ProjectListItem struct {
 	LatestEvent    string  `json:"latest_event,omitempty"`
 	Trend          []int32 `json:"trend"`
 	LatestRelease  string  `json:"latest_release,omitempty"`
-	ErrorsThisWeek int32  `json:"errors_this_week"`
-	ErrorsLastWeek int32  `json:"errors_last_week"`
+	ErrorsThisWeek int32   `json:"errors_this_week"`
+	ErrorsLastWeek int32   `json:"errors_last_week"`
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +525,23 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		legacyDSN = buildLegacyDSN(r, keys[0].PublicKey, project.ID)
 	}
 
-	writeJSON(w, http.StatusOK, ProjectResponse{SafeProject: toSafeProject(project), DSN: dsn, LegacyDSN: legacyDSN})
+	settings, err := loadProjectSettings(r.Context(), h.queries, project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project settings")
+		return
+	}
+	sp := toSafeProject(project, settings)
+	if project.GroupID.Valid {
+		if groups, err := h.queries.ListProjectGroups(r.Context()); err == nil {
+			for _, g := range groups {
+				if g.ID == project.GroupID.UUID {
+					sp.GroupName = g.Name
+					break
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, ProjectResponse{SafeProject: sp, DSN: dsn, LegacyDSN: legacyDSN})
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -295,6 +568,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existingSettings, err := loadProjectSettings(r.Context(), h.queries, existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get project settings")
+		return
+	}
+
 	// Preserve existing values when not provided
 	name := req.Name
 	if name == "" {
@@ -310,53 +589,53 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		cooldown = *req.DefaultCooldownMinutes
 	}
 
-	warningAsError := existing.WarningAsError
+	warningAsError := existingSettings.WarningAsError
 	if req.WarningAsError != nil {
 		warningAsError = *req.WarningAsError
 	}
 
 	jiraBaseURL := req.JiraBaseURL
 	if jiraBaseURL == "" {
-		jiraBaseURL = existing.JiraBaseUrl
+		jiraBaseURL = existingSettings.JiraBaseURL
 	}
 	jiraEmail := req.JiraEmail
 	if jiraEmail == "" {
-		jiraEmail = existing.JiraEmail
+		jiraEmail = existingSettings.JiraEmail
 	}
 	jiraProjectKey := req.JiraProjectKey
 	if jiraProjectKey == "" {
-		jiraProjectKey = existing.JiraProjectKey
+		jiraProjectKey = existingSettings.JiraProjectKey
 	}
 	jiraIssueType := req.JiraIssueType
 	if jiraIssueType == "" {
-		jiraIssueType = existing.JiraIssueType
+		jiraIssueType = existingSettings.JiraIssueType
 	}
 	if jiraIssueType == "" {
 		jiraIssueType = "Bug"
 	}
 	jiraApiToken := req.JiraAPIToken
 	if jiraApiToken == "" {
-		jiraApiToken = existing.JiraApiToken
+		jiraApiToken = existingSettings.JiraAPIToken
 	}
 
 	githubOwner := req.GithubOwner
 	if githubOwner == "" {
-		githubOwner = existing.GithubOwner
+		githubOwner = existingSettings.GithubOwner
 	}
 	githubRepo := req.GithubRepo
 	if githubRepo == "" {
-		githubRepo = existing.GithubRepo
+		githubRepo = existingSettings.GithubRepo
 	}
 	githubLabels := req.GithubLabels
 	if githubLabels == "" {
-		githubLabels = existing.GithubLabels
+		githubLabels = existingSettings.GithubLabels
 	}
 	if githubLabels == "" {
 		githubLabels = "bug"
 	}
 	githubToken := req.GithubToken
 	if githubToken == "" {
-		githubToken = existing.GithubToken
+		githubToken = existingSettings.GithubToken
 	}
 
 	workflowMode := req.WorkflowMode
@@ -369,35 +648,44 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	repoProvider := req.RepoProvider
 	if repoProvider == "" {
-		repoProvider = existing.RepoProvider
+		repoProvider = existingSettings.RepoProvider
 	}
 	repoOwner := req.RepoOwner
 	if repoOwner == "" {
-		repoOwner = existing.RepoOwner
+		repoOwner = existingSettings.RepoOwner
 	}
 	repoName := req.RepoName
 	if repoName == "" {
-		repoName = existing.RepoName
+		repoName = existingSettings.RepoName
 	}
 	repoDefaultBranch := req.RepoDefaultBranch
 	if repoDefaultBranch == "" {
-		repoDefaultBranch = existing.RepoDefaultBranch
+		repoDefaultBranch = existingSettings.RepoDefaultBranch
 	}
 	if repoDefaultBranch == "" {
 		repoDefaultBranch = "main"
 	}
 	repoToken := req.RepoToken
 	if repoToken == "" {
-		repoToken = existing.RepoToken
+		repoToken = existingSettings.RepoToken
 	}
 	repoPathStrip := req.RepoPathStrip
 	if repoPathStrip == "" {
-		repoPathStrip = existing.RepoPathStrip
+		repoPathStrip = existingSettings.RepoPathStrip
 	}
 
-	maxEvents := existing.MaxEventsPerIssue
+	maxEvents := existingSettings.MaxEventsPerIssue
 	if req.MaxEventsPerIssue != nil {
 		maxEvents = *req.MaxEventsPerIssue
+	}
+
+	maxInfoIssues := existingSettings.MaxInfoIssues
+	if req.MaxInfoIssues != nil {
+		if *req.MaxInfoIssues < 0 {
+			writeError(w, http.StatusBadRequest, "max_info_issues must be >= 0")
+			return
+		}
+		maxInfoIssues = *req.MaxInfoIssues
 	}
 
 	icon := existing.Icon
@@ -409,78 +697,128 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		color = *req.Color
 	}
 
-	issueDisplayMode := existing.IssueDisplayMode
+	issueDisplayMode := existingSettings.IssueDisplayMode
 	if req.IssueDisplayMode != "" {
 		issueDisplayMode = req.IssueDisplayMode
 	}
 
-	aiEnabled := existing.AiEnabled
+	errorGroupingMode := normalizeIssueGroupingMode(existingSettings.ErrorGroupingMode)
+	if req.ErrorGroupingMode != "" {
+		errorGroupingMode = normalizeIssueGroupingMode(req.ErrorGroupingMode)
+	}
+
+	warningGroupingMode := normalizeIssueGroupingMode(existingSettings.WarningGroupingMode)
+	if req.WarningGroupingMode != "" {
+		warningGroupingMode = normalizeIssueGroupingMode(req.WarningGroupingMode)
+	}
+
+	infoGroupingMode := normalizeIssueGroupingMode(existingSettings.InfoGroupingMode)
+	if req.InfoGroupingMode != "" {
+		infoGroupingMode = normalizeIssueGroupingMode(req.InfoGroupingMode)
+	}
+
+	aiEnabled := existingSettings.AIEnabled
 	if req.AIEnabled != nil {
 		aiEnabled = *req.AIEnabled
 	}
 	aiModel := req.AIModel
 	if aiModel == "" {
-		aiModel = existing.AiModel
+		aiModel = existingSettings.AIModel
 	}
-	aiMergeSuggestions := existing.AiMergeSuggestions
+	aiMergeSuggestions := existingSettings.AIMergeSuggestions
 	if req.AIMergeSuggestions != nil {
 		aiMergeSuggestions = *req.AIMergeSuggestions
 	}
-	aiAutoMerge := existing.AiAutoMerge
+	aiAutoMerge := existingSettings.AIAutoMerge
 	if req.AIAutoMerge != nil {
 		aiAutoMerge = *req.AIAutoMerge
 	}
-	aiAnomalyDetection := existing.AiAnomalyDetection
+	aiAnomalyDetection := existingSettings.AIAnomalyDetection
 	if req.AIAnomalyDetection != nil {
 		aiAnomalyDetection = *req.AIAnomalyDetection
 	}
-	aiTicketDescription := existing.AiTicketDescription
+	aiTicketDescription := existingSettings.AITicketDescription
 	if req.AITicketDescription != nil {
 		aiTicketDescription = *req.AITicketDescription
 	}
-	aiRootCause := existing.AiRootCause
+	aiRootCause := existingSettings.AIRootCause
 	if req.AIRootCause != nil {
 		aiRootCause = *req.AIRootCause
 	}
-	aiTriage := existing.AiTriage
+	aiTriage := existingSettings.AITriage
 	if req.AITriage != nil {
 		aiTriage = *req.AITriage
 	}
 
-	project, err := h.queries.UpdateProject(r.Context(), db.UpdateProjectParams{
+	stacktraceRules := parseStacktraceRules(existingSettings.StacktraceRules)
+	if req.StacktraceRules != nil {
+		stacktraceRules = normalizeStacktraceRules(*req.StacktraceRules)
+		if err := validateStacktraceRules(stacktraceRules); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	analysisDBEnabled := existingSettings.AnalysisDBEnabled
+	if req.AnalysisDBEnabled != nil {
+		analysisDBEnabled = *req.AnalysisDBEnabled
+	}
+	analysisDBDriver := existingSettings.AnalysisDBDriver
+	if req.AnalysisDBDriver != nil {
+		analysisDBDriver = strings.TrimSpace(*req.AnalysisDBDriver)
+	}
+	analysisDBDSN := existingSettings.AnalysisDBDSN
+	if req.AnalysisDBDSN != nil {
+		analysisDBDSN = strings.TrimSpace(*req.AnalysisDBDSN)
+	}
+	analysisDBName := existingSettings.AnalysisDBName
+	if req.AnalysisDBName != nil {
+		analysisDBName = strings.TrimSpace(*req.AnalysisDBName)
+	}
+	analysisDBSchema := existingSettings.AnalysisDBSchema
+	if req.AnalysisDBSchema != nil {
+		analysisDBSchema = strings.TrimSpace(*req.AnalysisDBSchema)
+	}
+	analysisDBNotes := existingSettings.AnalysisDBNotes
+	if req.AnalysisDBNotes != nil {
+		analysisDBNotes = strings.TrimSpace(*req.AnalysisDBNotes)
+	}
+
+	framework := existingSettings.Framework
+	if req.Framework != nil {
+		framework = strings.TrimSpace(*req.Framework)
+	}
+	if framework == "" {
+		framework = "generic"
+	}
+
+	routeGroupingEnabled := existingSettings.RouteGroupingEnabled
+	if req.RouteGroupingEnabled != nil {
+		routeGroupingEnabled = *req.RouteGroupingEnabled
+	}
+
+	rawdb, ok := h.queries.RawDB().(*sql.DB)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "project store is not transaction-capable")
+		return
+	}
+	tx, err := rawdb.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start project update")
+		return
+	}
+	defer tx.Rollback()
+
+	txQueries := h.queries.WithTx(tx)
+
+	project, err := txQueries.UpdateProject(r.Context(), db.UpdateProjectParams{
 		ID:                     id,
 		Name:                   name,
 		Slug:                   slug,
 		DefaultCooldownMinutes: cooldown,
-		WarningAsError:         warningAsError,
-		JiraBaseUrl:            jiraBaseURL,
-		JiraEmail:              jiraEmail,
-		JiraApiToken:           jiraApiToken,
-		JiraProjectKey:         jiraProjectKey,
-		JiraIssueType:          jiraIssueType,
-		MaxEventsPerIssue:      maxEvents,
 		Icon:                   icon,
 		Color:                  color,
-		IssueDisplayMode:       issueDisplayMode,
-		GithubToken:            githubToken,
-		GithubOwner:            githubOwner,
-		GithubRepo:             githubRepo,
-		GithubLabels:           githubLabels,
 		WorkflowMode:           workflowMode,
-		RepoProvider:           repoProvider,
-		RepoOwner:              repoOwner,
-		RepoName:               repoName,
-		RepoDefaultBranch:      repoDefaultBranch,
-		RepoToken:              repoToken,
-		RepoPathStrip:          repoPathStrip,
-		AiEnabled:              aiEnabled,
-		AiModel:                aiModel,
-		AiMergeSuggestions:     aiMergeSuggestions,
-		AiAutoMerge:            aiAutoMerge,
-		AiAnomalyDetection:     aiAnomalyDetection,
-		AiTicketDescription:    aiTicketDescription,
-		AiRootCause:            aiRootCause,
-		AiTriage:               aiTriage,
 	})
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -488,6 +826,51 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update project")
+		return
+	}
+
+	if err := saveProjectSettings(r.Context(), txQueries, id, ProjectSettings{
+		WarningAsError:       warningAsError,
+		MaxEventsPerIssue:    maxEvents,
+		IssueDisplayMode:     issueDisplayMode,
+		ErrorGroupingMode:    errorGroupingMode,
+		WarningGroupingMode:  warningGroupingMode,
+		InfoGroupingMode:     infoGroupingMode,
+		MaxInfoIssues:        maxInfoIssues,
+		JiraBaseURL:          jiraBaseURL,
+		JiraEmail:            jiraEmail,
+		JiraAPIToken:         jiraApiToken,
+		JiraProjectKey:       jiraProjectKey,
+		JiraIssueType:        jiraIssueType,
+		GithubToken:          githubToken,
+		GithubOwner:          githubOwner,
+		GithubRepo:           githubRepo,
+		GithubLabels:         githubLabels,
+		RepoProvider:         repoProvider,
+		RepoOwner:            repoOwner,
+		RepoName:             repoName,
+		RepoDefaultBranch:    repoDefaultBranch,
+		RepoToken:            repoToken,
+		RepoPathStrip:        repoPathStrip,
+		AIEnabled:            aiEnabled,
+		AIModel:              aiModel,
+		AIMergeSuggestions:   aiMergeSuggestions,
+		AIAutoMerge:          aiAutoMerge,
+		AIAnomalyDetection:   aiAnomalyDetection,
+		AITicketDescription:  aiTicketDescription,
+		AIRootCause:          aiRootCause,
+		AITriage:             aiTriage,
+		StacktraceRules:      marshalStacktraceRules(stacktraceRules),
+		AnalysisDBEnabled:    analysisDBEnabled,
+		AnalysisDBDriver:     analysisDBDriver,
+		AnalysisDBDSN:        analysisDBDSN,
+		AnalysisDBName:       analysisDBName,
+		AnalysisDBSchema:     analysisDBSchema,
+		AnalysisDBNotes:      analysisDBNotes,
+		Framework:            framework,
+		RouteGroupingEnabled: routeGroupingEnabled,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update project settings")
 		return
 	}
 
@@ -502,15 +885,63 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 			groupID = uuid.NullUUID{UUID: parsed, Valid: true}
 		}
-		_ = h.queries.SetProjectGroup(r.Context(), db.SetProjectGroupParams{
+		if err := txQueries.SetProjectGroup(r.Context(), db.SetProjectGroupParams{
 			ID:      id,
 			GroupID: groupID,
-		})
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update project group")
+			return
+		}
 		project.GroupID = groupID
 	}
 
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit project update")
+		return
+	}
+
 	h.cache.InvalidateSync(r.Context())
-	writeJSON(w, http.StatusOK, toSafeProject(project))
+	writeJSON(w, http.StatusOK, toSafeProject(project, ProjectSettings{
+		WarningAsError:       warningAsError,
+		MaxEventsPerIssue:    maxEvents,
+		IssueDisplayMode:     issueDisplayMode,
+		ErrorGroupingMode:    errorGroupingMode,
+		WarningGroupingMode:  warningGroupingMode,
+		InfoGroupingMode:     infoGroupingMode,
+		MaxInfoIssues:        maxInfoIssues,
+		JiraBaseURL:          jiraBaseURL,
+		JiraEmail:            jiraEmail,
+		JiraAPIToken:         jiraApiToken,
+		JiraProjectKey:       jiraProjectKey,
+		JiraIssueType:        jiraIssueType,
+		GithubToken:          githubToken,
+		GithubOwner:          githubOwner,
+		GithubRepo:           githubRepo,
+		GithubLabels:         githubLabels,
+		RepoProvider:         repoProvider,
+		RepoOwner:            repoOwner,
+		RepoName:             repoName,
+		RepoDefaultBranch:    repoDefaultBranch,
+		RepoToken:            repoToken,
+		RepoPathStrip:        repoPathStrip,
+		AIEnabled:            aiEnabled,
+		AIModel:              aiModel,
+		AIMergeSuggestions:   aiMergeSuggestions,
+		AIAutoMerge:          aiAutoMerge,
+		AIAnomalyDetection:   aiAnomalyDetection,
+		AITicketDescription:  aiTicketDescription,
+		AIRootCause:          aiRootCause,
+		AITriage:             aiTriage,
+		StacktraceRules:      marshalStacktraceRules(stacktraceRules),
+		AnalysisDBEnabled:    analysisDBEnabled,
+		AnalysisDBDriver:     analysisDBDriver,
+		AnalysisDBDSN:        analysisDBDSN,
+		AnalysisDBName:       analysisDBName,
+		AnalysisDBSchema:     analysisDBSchema,
+		AnalysisDBNotes:      analysisDBNotes,
+		Framework:            framework,
+		RouteGroupingEnabled: routeGroupingEnabled,
+	}))
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {

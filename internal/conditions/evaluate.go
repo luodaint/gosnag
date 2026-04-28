@@ -61,6 +61,8 @@ func evaluateLeaf(node Node, ctx *EvalContext) bool {
 		return compareInt(ctx.UserCount(), node.Op, node.IntValue())
 	case "priority":
 		return compareInt(ctx.Issue.Priority, node.Op, node.IntValue())
+	case "has_app_frame":
+		return compareBool(ctx.Issue.HasAppFrame, node.Op, node.BoolValue())
 	default:
 		return false
 	}
@@ -137,6 +139,17 @@ func compareInt(value int32, op string, threshold int32) bool {
 		return value < threshold
 	default:
 		return value >= threshold
+	}
+}
+
+func compareBool(value bool, op string, expected bool) bool {
+	switch op {
+	case "neq", "!=":
+		return value != expected
+	case "eq", "==", "":
+		return value == expected
+	default:
+		return value == expected
 	}
 }
 

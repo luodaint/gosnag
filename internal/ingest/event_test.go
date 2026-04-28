@@ -1,6 +1,10 @@
 package ingest
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/darkspock/gosnag/internal/database/db"
+)
 
 func boolPtr(v bool) *bool { return &v }
 
@@ -95,5 +99,131 @@ func TestFingerprintMessageFallback(t *testing.T) {
 	}
 	if eventA.ComputeFingerprint() == eventC.ComputeFingerprint() {
 		t.Fatal("different messages should produce different fingerprints")
+	}
+}
+
+func TestURLGroupingHintUsesRequestURL(t *testing.T) {
+	eventA := &SentryEvent{
+		Request: map[string]any{
+			"method": "post",
+			"url":    "https://www.covermanager.com/api2/GoogleMaps/v3/CreateBooking?foo=bar",
+		},
+	}
+
+	hint, ok := eventA.URLGroupingHint()
+	if !ok {
+		t.Fatal("expected URL grouping hint")
+	}
+
+	if got, want := hint.Culprit, "POST /api2/GoogleMaps/v3/CreateBooking"; got != want {
+		t.Fatalf("unexpected culprit: got %q want %q", got, want)
+	}
+
+	if got, want := hint.Title, "POST /api2/GoogleMaps/v3/CreateBooking"; got != want {
+		t.Fatalf("unexpected title: got %q want %q", got, want)
+	}
+}
+
+func TestURLGroupingHintFallsBackToMessageURL(t *testing.T) {
+	event := &SentryEvent{
+		Message: "Error: [SlowRequest]\nURL: POST http://www.covermanager.com/api2/GoogleMaps/v3/CreateBooking\nBody: {\"merchant_id\":\"5453\"}",
+	}
+
+	hint, ok := event.URLGroupingHint()
+	if !ok {
+		t.Fatal("expected URL grouping hint from message")
+	}
+
+	if got, want := hint.FingerprintKey, "info:url|POST|/api2/GoogleMaps/v3/CreateBooking"; got != want {
+		t.Fatalf("unexpected fingerprint key: got %q want %q", got, want)
+	}
+}
+
+func TestURLGroupingHintNormalizesFrameworkParams(t *testing.T) {
+	event := &SentryEvent{
+		Request: map[string]any{
+			"method": "get",
+			"url":    "http://www.covermanager.com/coverApp/Reserv/getCalendar/4/2026",
+		},
+	}
+
+	hint, ok := event.URLGroupingHint()
+	if !ok {
+		t.Fatal("expected URL grouping hint")
+	}
+
+	if got, want := hint.Culprit, "GET /coverApp/Reserv/getCalendar/:int/:year"; got != want {
+		t.Fatalf("unexpected culprit: got %q want %q", got, want)
+	}
+}
+
+func TestResolveIssueGroupingByURLForErrorWithoutException(t *testing.T) {
+	event := &SentryEvent{
+		Level:   "error",
+		Message: "Error: [ExcessiveQueries]\nURL: GET http://www.covermanager.com/coverApp/Reserv/getCalendar/4/2026",
+		Request: map[string]any{
+			"method": "get",
+			"url":    "http://www.covermanager.com/coverApp/Reserv/getCalendar/4/2026",
+		},
+	}
+
+	fingerprint, title, culprit := resolveIssueGrouping(db.Project{}.ID, event, issueSettings{ErrorGroupingMode: "by_url"}, nil)
+
+	if fingerprint != hashFingerprintKey("info:url|GET|/coverApp/Reserv/getCalendar/:int/:year") {
+		t.Fatalf("unexpected fingerprint: %q", fingerprint)
+	}
+	if title != "Error: [ExcessiveQueries]\nURL: GET http://www.covermanager.com/coverApp/Reserv/getCalendar/4/2026" {
+		t.Fatalf("unexpected title: %q", title)
+	}
+	if culprit != "GET /coverApp/Reserv/getCalendar/:int/:year" {
+		t.Fatalf("unexpected culprit: %q", culprit)
+	}
+}
+
+func TestResolveIssueGroupingByURLForWarningUsesEffectiveErrorMode(t *testing.T) {
+	event := &SentryEvent{
+		Level:   "warning",
+		Message: "Warning: [SlowRequest]\nURL: GET http://www.covermanager.com/coverApp/Reserv/getCalendar/4/2026",
+		Request: map[string]any{
+			"method": "get",
+			"url":    "http://www.covermanager.com/coverApp/Reserv/getCalendar/4/2026",
+		},
+	}
+
+	fingerprint, _, culprit := resolveIssueGrouping(db.Project{}.ID, event, issueSettings{
+		WarningAsError:    true,
+		ErrorGroupingMode: "by_url",
+	}, nil)
+
+	if fingerprint != hashFingerprintKey("info:url|GET|/coverApp/Reserv/getCalendar/:int/:year") {
+		t.Fatalf("unexpected fingerprint: %q", fingerprint)
+	}
+	if culprit != "GET /coverApp/Reserv/getCalendar/:int/:year" {
+		t.Fatalf("unexpected culprit: %q", culprit)
+	}
+}
+
+func TestFileGroupingHintUsesInAppFrame(t *testing.T) {
+	event := &SentryEvent{
+		Exception: &ExceptionData{Values: []ExceptionValue{{
+			Type: "RuntimeException",
+			Stacktrace: &Stacktrace{Frames: []Frame{
+				{Filename: "/vendor/framework/Core.php", Function: "run", InApp: boolPtr(false)},
+				{Filename: "/application/controllers/Booking.php", Function: "create", InApp: boolPtr(true)},
+			}},
+		}}},
+	}
+
+	hint, ok := event.FileGroupingHint()
+	if !ok {
+		t.Fatal("expected file grouping hint")
+	}
+
+	if got, want := hint.Culprit, "/application/controllers/Booking.php"; got != want {
+		t.Fatalf("unexpected culprit: got %q want %q", got, want)
+	}
+
+	if got, want := hint.Title, "RuntimeException: Booking.php"; got != want {
+		t.Fatalf("unexpected title: got %q want %q", got, want)
 	}
 }

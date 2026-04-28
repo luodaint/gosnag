@@ -7,6 +7,7 @@ import (
 
 	"github.com/darkspock/gosnag/internal/conditions"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/google/uuid"
 )
 
@@ -17,12 +18,12 @@ func CheckAndCreateIssue(ctx context.Context, queries *db.Queries, baseURL strin
 		return
 	}
 
-	project, err := queries.GetProject(ctx, projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(ctx, queries, projectID)
 	if err != nil {
 		return
 	}
 
-	cfg := ConfigFromProject(project)
+	cfg := ConfigFromSettings(settings)
 	if !cfg.IsConfigured() {
 		return
 	}
@@ -36,14 +37,16 @@ func CheckAndCreateIssue(ctx context.Context, queries *db.Queries, baseURL strin
 	if uc, err := queries.GetIssueUserCount(ctx, issue.ID); err == nil {
 		userCount = int32(uc)
 	}
+	eventData := conditions.LoadLatestEventData(ctx, queries, issue.ID)
 
 	evalCtx := conditions.NewEvalContext(conditions.IssueData{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Level:      issue.Level,
-		Platform:   issue.Platform,
-		EventCount: issue.EventCount,
-	}, "", &githubLoader{queries: queries, ctx: ctx})
+		ID:          issue.ID,
+		Title:       issue.Title,
+		Level:       issue.Level,
+		Platform:    issue.Platform,
+		EventCount:  issue.EventCount,
+		HasAppFrame: conditions.HasAppFrame(eventData, settings.StacktraceRules),
+	}, string(eventData), &githubLoader{queries: queries, ctx: ctx})
 
 	for _, rule := range rules {
 		if MatchesRule(rule, issue, userCount, evalCtx) {

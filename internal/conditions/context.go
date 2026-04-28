@@ -21,6 +21,7 @@ type IssueData struct {
 	Environment string
 	Release     string
 	Priority    int32
+	HasAppFrame bool
 }
 
 // EvalContext provides data for condition evaluation with lazy loading.

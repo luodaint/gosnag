@@ -9,6 +9,7 @@ import (
 	"github.com/darkspock/gosnag/internal/activity"
 	"github.com/darkspock/gosnag/internal/config"
 	"github.com/darkspock/gosnag/internal/database/db"
+	projectcfg "github.com/darkspock/gosnag/internal/project"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
@@ -31,13 +32,13 @@ func (h *Handler) TestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.queries.GetProject(r.Context(), projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(r.Context(), h.queries, projectID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
 
-	cfg := ConfigFromProject(project)
+	cfg := ConfigFromSettings(settings)
 	if !cfg.IsConfigured() {
 		writeError(w, http.StatusBadRequest, "Jira is not configured for this project")
 		return
@@ -65,13 +66,13 @@ func (h *Handler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.queries.GetProject(r.Context(), projectID)
+	_, settings, err := projectcfg.LoadSettingsByProjectID(r.Context(), h.queries, projectID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
 
-	cfg := ConfigFromProject(project)
+	cfg := ConfigFromSettings(settings)
 	if !cfg.IsConfigured() {
 		writeError(w, http.StatusBadRequest, "Jira is not configured for this project")
 		return
